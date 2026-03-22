@@ -1,3 +1,6 @@
 /target
 .claude/prompt-counter.txt
 *.mp4
+.agent/
+.agents/
+skills-lock.json
