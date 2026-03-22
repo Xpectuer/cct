@@ -28,7 +28,7 @@ repos:
 
       - id: trailing-whitespace
         name: trailing whitespace
-        entry: sed -i 's/[[:space:]]*$//'
+        entry: bash -c 'for f in "$@"; do sed -i "" "s/[[:space:]]*$//" "$f" 2>/dev/null || sed -i "s/[[:space:]]*$//" "$f"; done'
         language: system
         types: [text]
 
