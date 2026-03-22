@@ -11,7 +11,7 @@ A terminal UI for managing and launching [Claude Code](https://claude.ai/code) w
 - **Sensitive value masking** — env keys containing `TOKEN`, `KEY`, or `SECRET` are redacted in the UI
 - **skip_permissions toggle** — press `s` to toggle `--dangerously-skip-permissions` on the selected profile; the profile row turns red as a visual warning; the change is persisted immediately to `profiles.toml`
 - **Autoinstall** — if `claude` is not found in PATH on startup, `cct` offers to install it via `curl -fsSL https://claude.ai/install.sh | bash`
-- **Hot-reload** — press `e` to open `$EDITOR`, config is re-parsed on return
+- **Inline profile editing** — press `e` on a selected profile to open a prefilled edit form, update the fields inline, and save back to `profiles.toml`
 - **Zero overhead** — `exec()` replaces the process; no parent lingers
 
 ## Install
@@ -40,7 +40,7 @@ Requires Rust 1.70+ and a Unix-like OS (uses `exec`).
 
    **Option B — CLI**: Run `cct add` and answer the prompts.
 
-   **Option C — Manual edit**: Edit the config directly with `e` or open `~/.config/cc-tui/profiles.toml` in any editor:
+   **Option C — Manual edit**: Edit `~/.config/cc-tui/profiles.toml` directly in any editor if you prefer working outside the TUI:
 
 ```toml
 [[profiles]]
@@ -63,7 +63,7 @@ API_TIMEOUT_MS = "600000"
 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
 ```
 
-3. Run `cct`, select a profile, and press Enter to launch.
+3. Run `cct`, select a profile, and press `e` to edit it inline or `Enter` to launch it.
 
 ## Keybindings
 
@@ -76,7 +76,7 @@ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
 | `Enter` | Launch selected profile |
 | `s` | Toggle `skip_permissions` on selected profile (row turns red when enabled) |
 | `a` | Open inline add-profile form |
-| `e` | Edit config in `$EDITOR` |
+| `e` | Edit the selected profile inline |
 | `q` / `Ctrl-C` | Quit |
 
 ### Add Form Mode

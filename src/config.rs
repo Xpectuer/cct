@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::{collections::HashMap, fs, path::PathBuf};
+use toml_edit::{value, Item, Table};
 
 #[derive(Debug, Default, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -112,6 +113,114 @@ fn non_empty(opt: &Option<String>) -> Option<&str> {
     opt.as_deref().filter(|s| !s.is_empty())
 }
 
+fn set_optional_string(entry: &mut Table, key: &str, new_value: Option<&str>) {
+    if let Some(new_str) = new_value {
+        entry[key] = value(new_str);
+    } else {
+        entry.remove(key);
+    }
+}
+
+fn set_optional_bool(entry: &mut Table, key: &str, new_value: Option<bool>) {
+    if let Some(new_bool) = new_value {
+        entry[key] = value(new_bool);
+    } else {
+        entry.remove(key);
+    }
+}
+
+fn ensure_env_table(entry: &mut Table) -> &mut Table {
+    if !matches!(entry.get("env"), Some(Item::Table(_))) {
+        entry["env"] = Item::Table(Table::new());
+    }
+    entry["env"]
+        .as_table_mut()
+        .expect("env item should be a table")
+}
+
+fn prune_empty_env_table(entry: &mut Table) {
+    let should_remove = entry
+        .get("env")
+        .and_then(Item::as_table)
+        .map(Table::is_empty)
+        .unwrap_or(false);
+    if should_remove {
+        entry.remove("env");
+    }
+}
+
+pub fn update_profile(original_name: &str, updated: &NewProfile) -> Result<()> {
+    let path = config_path();
+    let content = fs::read_to_string(&path).with_context(|| format!("read config {path:?}"))?;
+    let mut doc = content
+        .parse::<toml_edit::DocumentMut>()
+        .with_context(|| format!("parse TOML in {path:?}"))?;
+
+    let profiles = doc
+        .get_mut("profiles")
+        .and_then(|v| v.as_array_of_tables_mut())
+        .with_context(|| "no [[profiles]] array in config")?;
+
+    let entry = profiles
+        .iter_mut()
+        .find(|t| t.get("name").and_then(|v| v.as_str()) == Some(original_name))
+        .with_context(|| format!("profile {original_name:?} not found in config"))?;
+
+    entry["name"] = value(updated.name.as_str());
+    set_optional_string(entry, "description", non_empty(&updated.description));
+    set_optional_string(entry, "model", non_empty(&updated.model));
+    set_optional_string(entry, "base_url", non_empty(&updated.base_url));
+
+    match updated.backend {
+        Backend::Claude => {
+            entry.remove("backend");
+            entry.remove("full_auto");
+
+            let env = ensure_env_table(entry);
+            set_optional_string(env, "ANTHROPIC_BASE_URL", non_empty(&updated.base_url));
+            set_optional_string(env, "ANTHROPIC_API_KEY", non_empty(&updated.api_key));
+
+            if let Some(model) = non_empty(&updated.model) {
+                for key in [
+                    "ANTHROPIC_MODEL",
+                    "ANTHROPIC_SMALL_FAST_MODEL",
+                    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+                ] {
+                    env[key] = value(model);
+                }
+                env["API_TIMEOUT_MS"] = value("600000");
+                env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = value("1");
+            } else {
+                for key in [
+                    "ANTHROPIC_MODEL",
+                    "ANTHROPIC_SMALL_FAST_MODEL",
+                    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+                    "API_TIMEOUT_MS",
+                    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+                ] {
+                    env.remove(key);
+                }
+            }
+        }
+        Backend::Codex => {
+            entry["backend"] = value("codex");
+            entry.remove("description");
+            set_optional_bool(entry, "full_auto", updated.full_auto);
+
+            let env = ensure_env_table(entry);
+            set_optional_string(env, "OPENAI_API_KEY", non_empty(&updated.api_key));
+        }
+    }
+
+    prune_empty_env_table(entry);
+    fs::write(&path, doc.to_string()).with_context(|| format!("write config {path:?}"))?;
+    Ok(())
+}
+
 pub fn append_profile(profile: &NewProfile) -> Result<()> {
     let path = config_path();
     let mut block = String::from("\n[[profiles]]\n");
@@ -200,7 +309,7 @@ pub fn toggle_skip_permissions(profile_name: &str, new_value: bool) -> Result<()
         .find(|t| t.get("name").and_then(|v| v.as_str()) == Some(profile_name))
         .with_context(|| format!("profile {profile_name:?} not found in config"))?;
 
-    entry["skip_permissions"] = toml_edit::value(new_value);
+    entry["skip_permissions"] = value(new_value);
     fs::write(&path, doc.to_string()).with_context(|| format!("write config {path:?}"))?;
     Ok(())
 }
@@ -224,7 +333,7 @@ pub fn toggle_full_auto(profile_name: &str, new_value: bool) -> Result<()> {
         .find(|t| t.get("name").and_then(|v| v.as_str()) == Some(profile_name))
         .with_context(|| format!("profile {profile_name:?} not found in config"))?;
 
-    entry["full_auto"] = toml_edit::value(new_value);
+    entry["full_auto"] = value(new_value);
     fs::write(&path, doc.to_string()).with_context(|| format!("write config {path:?}"))?;
     Ok(())
 }
@@ -819,6 +928,191 @@ base_url = "https://api.example.com/v1"
             appended_block.contains("base_url = \"https://api.openai.com/v1\""),
             "Expected base_url as profile-level field, got:\n{appended_block}"
         );
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn update_profile_preserves_extra_args() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(
+            &path,
+            r#"[[profiles]]
+name = "codex-profile"
+backend = "codex"
+model = "gpt-4.1"
+base_url = "https://old.example/v1"
+full_auto = false
+extra_args = ["--sandbox", "workspace-write"]
+
+[profiles.env]
+OPENAI_API_KEY = "sk-old"
+"#,
+        )
+        .unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let updated = NewProfile {
+            name: "codex-profile".into(),
+            description: None,
+            base_url: Some("https://new.example/v1".into()),
+            api_key: Some("sk-new".into()),
+            model: Some("gpt-5.4".into()),
+            backend: Backend::Codex,
+            full_auto: Some(true),
+        };
+
+        update_profile("codex-profile", &updated).unwrap();
+
+        let profiles = load_profiles().unwrap();
+        let profile = &profiles[0];
+        assert_eq!(
+            profile.extra_args.as_deref(),
+            Some(&["--sandbox".to_string(), "workspace-write".to_string()][..])
+        );
+        assert_eq!(profile.base_url.as_deref(), Some("https://new.example/v1"));
+        assert_eq!(profile.model.as_deref(), Some("gpt-5.4"));
+        assert_eq!(profile.full_auto, Some(true));
+        assert_eq!(
+            profile
+                .env
+                .as_ref()
+                .and_then(|env| env.get("OPENAI_API_KEY"))
+                .map(String::as_str),
+            Some("sk-new")
+        );
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn update_profile_preserves_unknown_env_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(
+            &path,
+            r#"[[profiles]]
+name = "claude-profile"
+description = "Old description"
+model = "old-model"
+base_url = "https://old.example/v1"
+
+[profiles.env]
+ANTHROPIC_BASE_URL = "https://old.example/v1"
+ANTHROPIC_API_KEY = "sk-old"
+ANTHROPIC_MODEL = "old-model"
+ANTHROPIC_SMALL_FAST_MODEL = "old-model"
+ANTHROPIC_DEFAULT_SONNET_MODEL = "old-model"
+ANTHROPIC_DEFAULT_OPUS_MODEL = "old-model"
+ANTHROPIC_DEFAULT_HAIKU_MODEL = "old-model"
+API_TIMEOUT_MS = "600000"
+CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+CUSTOM_HEADER = "keep-me"
+"#,
+        )
+        .unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let updated = NewProfile {
+            name: "claude-profile".into(),
+            description: Some("New description".into()),
+            base_url: Some("https://new.example/v1".into()),
+            api_key: Some("sk-new".into()),
+            model: Some("new-model".into()),
+            backend: Backend::Claude,
+            full_auto: None,
+        };
+
+        update_profile("claude-profile", &updated).unwrap();
+
+        let profiles = load_profiles().unwrap();
+        let profile = &profiles[0];
+        let env = profile.env.as_ref().unwrap();
+        assert_eq!(profile.description.as_deref(), Some("New description"));
+        assert_eq!(profile.base_url.as_deref(), Some("https://new.example/v1"));
+        assert_eq!(profile.model.as_deref(), Some("new-model"));
+        assert_eq!(
+            env.get("CUSTOM_HEADER").map(String::as_str),
+            Some("keep-me")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_API_KEY").map(String::as_str),
+            Some("sk-new")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("new-model")
+        );
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn update_profile_renames_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(
+            &path,
+            r#"[[profiles]]
+name = "first"
+description = "First profile"
+
+[[profiles]]
+name = "second"
+description = "Second profile"
+"#,
+        )
+        .unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let updated = NewProfile {
+            name: "renamed".into(),
+            description: Some("Updated profile".into()),
+            base_url: None,
+            api_key: None,
+            model: None,
+            backend: Backend::Claude,
+            full_auto: None,
+        };
+
+        update_profile("first", &updated).unwrap();
+
+        let profiles = load_profiles().unwrap();
+        assert_eq!(profiles[0].name, "renamed");
+        assert_eq!(profiles[0].description.as_deref(), Some("Updated profile"));
+        assert_eq!(profiles[1].name, "second");
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("name = \"renamed\""));
+        assert!(!content.contains("name = \"first\""));
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn update_profile_missing_original_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, "[[profiles]]\nname = \"other\"\n").unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let updated = NewProfile {
+            name: "renamed".into(),
+            description: None,
+            base_url: None,
+            api_key: None,
+            model: None,
+            backend: Backend::Claude,
+            full_auto: None,
+        };
+
+        let result = update_profile("missing", &updated);
+        assert!(result.is_err());
 
         std::env::remove_var("CCT_CONFIG");
     }

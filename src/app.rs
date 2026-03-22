@@ -20,6 +20,8 @@ pub struct FormState {
     pub confirming: bool,
     pub error: Option<String>,
     pub backend: Backend,
+    pub is_edit: bool,
+    pub original_name: Option<String>,
 }
 
 impl Default for FormState {
@@ -30,6 +32,10 @@ impl Default for FormState {
 
 impl FormState {
     pub fn new() -> Self {
+        Self::new_for_backend(Backend::Claude)
+    }
+
+    pub fn new_for_backend(backend: Backend) -> Self {
         Self {
             fields: [
                 String::new(),
@@ -41,8 +47,53 @@ impl FormState {
             active_field: 0,
             confirming: false,
             error: None,
-            backend: Backend::Claude,
+            backend,
+            is_edit: false,
+            original_name: None,
         }
+    }
+
+    pub fn from_profile(profile: &Profile) -> Self {
+        let mut form = Self::new_for_backend(profile.backend.clone());
+        form.is_edit = true;
+        form.original_name = Some(profile.name.clone());
+
+        match profile.backend {
+            Backend::Claude => {
+                let env = profile.env.as_ref();
+                form.fields = [
+                    profile.name.clone(),
+                    profile.description.clone().unwrap_or_default(),
+                    profile.base_url.clone().unwrap_or_else(|| {
+                        env.and_then(|map| map.get("ANTHROPIC_BASE_URL").cloned())
+                            .unwrap_or_default()
+                    }),
+                    env.and_then(|map| map.get("ANTHROPIC_API_KEY").cloned())
+                        .unwrap_or_default(),
+                    profile.model.clone().unwrap_or_else(|| {
+                        env.and_then(|map| map.get("ANTHROPIC_MODEL").cloned())
+                            .unwrap_or_default()
+                    }),
+                ];
+            }
+            Backend::Codex => {
+                let env = profile.env.as_ref();
+                form.fields = [
+                    profile.name.clone(),
+                    profile.base_url.clone().unwrap_or_default(),
+                    env.and_then(|map| map.get("OPENAI_API_KEY").cloned())
+                        .unwrap_or_default(),
+                    profile.model.clone().unwrap_or_default(),
+                    if profile.full_auto.unwrap_or(false) {
+                        "y".into()
+                    } else {
+                        "n".into()
+                    },
+                ];
+            }
+        }
+
+        form
     }
 
     pub fn next_field(&mut self) {
@@ -223,6 +274,8 @@ mod tests {
                 assert_eq!(form.active_field, 0);
                 assert!(!form.confirming);
                 assert!(form.error.is_none());
+                assert!(!form.is_edit);
+                assert!(form.original_name.is_none());
             }
             _ => panic!("expected AddForm mode"),
         }
@@ -385,6 +438,76 @@ mod tests {
 
         assert_eq!(np.backend, Backend::Claude);
         assert!(np.full_auto.is_none());
+    }
+
+    #[test]
+    fn from_profile_claude_prefills_fields() {
+        use std::collections::HashMap;
+
+        let mut env = HashMap::new();
+        env.insert("ANTHROPIC_API_KEY".into(), "sk-ant-123".into());
+        let profile = Profile {
+            name: "claude-edit".into(),
+            description: Some("Claude profile".into()),
+            env: Some(env),
+            extra_args: None,
+            skip_permissions: Some(false),
+            model: Some("claude-sonnet-4-6".into()),
+            backend: Backend::Claude,
+            base_url: Some("https://example.com/v1".into()),
+            full_auto: None,
+        };
+
+        let form = FormState::from_profile(&profile);
+
+        assert!(form.is_edit);
+        assert_eq!(form.original_name.as_deref(), Some("claude-edit"));
+        assert_eq!(form.backend, Backend::Claude);
+        assert_eq!(
+            form.fields,
+            [
+                "claude-edit".to_string(),
+                "Claude profile".to_string(),
+                "https://example.com/v1".to_string(),
+                "sk-ant-123".to_string(),
+                "claude-sonnet-4-6".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn from_profile_codex_prefills_fields() {
+        use std::collections::HashMap;
+
+        let mut env = HashMap::new();
+        env.insert("OPENAI_API_KEY".into(), "sk-openai-123".into());
+        let profile = Profile {
+            name: "codex-edit".into(),
+            description: Some("ignored".into()),
+            env: Some(env),
+            extra_args: None,
+            skip_permissions: None,
+            model: Some("gpt-5.4".into()),
+            backend: Backend::Codex,
+            base_url: Some("https://api.openai.com/v1".into()),
+            full_auto: Some(true),
+        };
+
+        let form = FormState::from_profile(&profile);
+
+        assert!(form.is_edit);
+        assert_eq!(form.original_name.as_deref(), Some("codex-edit"));
+        assert_eq!(form.backend, Backend::Codex);
+        assert_eq!(
+            form.fields,
+            [
+                "codex-edit".to_string(),
+                "https://api.openai.com/v1".to_string(),
+                "sk-openai-123".to_string(),
+                "gpt-5.4".to_string(),
+                "y".to_string(),
+            ]
+        );
     }
 
     #[test]

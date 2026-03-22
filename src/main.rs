@@ -9,6 +9,7 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 
 use cct::app::{App, AppMode, FormState};
+use cct::config::Profile;
 use cct::{cli, config, launch, ui};
 
 #[derive(Parser)]
@@ -38,6 +39,73 @@ fn main() -> Result<()> {
     }
 }
 
+fn enter_add_mode(app: &mut App) {
+    app.mode = AppMode::AddForm(FormState::new_for_backend(app.active_backend.clone()));
+}
+
+fn enter_edit_mode(app: &mut App) {
+    if app.profiles.is_empty() {
+        return;
+    }
+    app.mode = AppMode::AddForm(FormState::from_profile(&app.profiles[app.selected]));
+}
+
+fn validate_form_name(
+    form: &FormState,
+    profiles: &[Profile],
+) -> std::result::Result<String, String> {
+    let name = form.fields[0].trim().to_string();
+    if name.is_empty() {
+        return Err("Name is required.".into());
+    }
+
+    let unchanged_name = form
+        .original_name
+        .as_deref()
+        .map(|original| original.eq_ignore_ascii_case(&name))
+        .unwrap_or(false);
+
+    let duplicate = profiles
+        .iter()
+        .any(|profile| profile.name.eq_ignore_ascii_case(&name));
+
+    if duplicate && !(form.is_edit && unchanged_name) {
+        return Err(format!("Profile '{}' already exists.", name));
+    }
+
+    Ok(name)
+}
+
+fn save_form(form: &FormState) -> std::result::Result<String, String> {
+    let final_name = form.fields[0].trim().to_string();
+    let new_profile = form.to_new_profile();
+
+    let result = if form.is_edit {
+        let original_name = form
+            .original_name
+            .as_deref()
+            .ok_or_else(|| "Missing original profile name.".to_string())?;
+        config::update_profile(original_name, &new_profile)
+    } else {
+        config::append_profile(&new_profile)
+    };
+
+    result
+        .map(|_| final_name)
+        .map_err(|e| format!("Save failed: {e:#}"))
+}
+
+fn reload_profiles_and_select(app: &mut App, selected_name: &str) -> Result<()> {
+    let updated = config::load_profiles()?;
+    let selected = updated
+        .iter()
+        .position(|profile| profile.name.eq_ignore_ascii_case(selected_name))
+        .unwrap_or_else(|| updated.len().saturating_sub(1));
+    app.selected = selected;
+    app.profiles = updated;
+    Ok(())
+}
+
 fn run_tui() -> Result<()> {
     let profiles = config::load_profiles()?;
 
@@ -52,6 +120,8 @@ fn run_tui() -> Result<()> {
         tui.draw(|f| ui::draw(&app, f))?;
 
         if let Event::Key(key) = event::read()? {
+            let mut post_save_select: Option<String> = None;
+
             match &mut app.mode {
                 AppMode::Normal => match (key.code, key.modifiers) {
                     (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
@@ -93,20 +163,7 @@ fn run_tui() -> Result<()> {
                         }
                     }
                     (KeyCode::Char('e'), _) => {
-                        launch::restore_terminal();
-                        launch::open_editor(&config::config_path())?;
-                        enable_raw_mode()?;
-                        execute!(io::stdout(), EnterAlternateScreen)?;
-                        tui.clear()?;
-                        match config::load_profiles() {
-                            Ok(updated) => {
-                                app.profiles = updated;
-                                if app.selected >= app.profiles.len() {
-                                    app.selected = app.profiles.len().saturating_sub(1);
-                                }
-                            }
-                            Err(e) => eprintln!("Warning: profile reload failed: {e:#}"),
-                        }
+                        enter_edit_mode(&mut app);
                     }
                     (KeyCode::Char('s'), _) if !app.profiles.is_empty() => {
                         let profile = &mut app.profiles[app.selected];
@@ -138,9 +195,7 @@ fn run_tui() -> Result<()> {
                         }
                     }
                     (KeyCode::Char('a'), _) => {
-                        let mut form = FormState::new();
-                        form.backend = app.active_backend.clone();
-                        app.mode = AppMode::AddForm(form);
+                        enter_add_mode(&mut app);
                     }
                     _ => {}
                 },
@@ -148,43 +203,22 @@ fn run_tui() -> Result<()> {
                     if form.confirming {
                         match key.code {
                             KeyCode::Char('y') | KeyCode::Char('Y') => {
-                                let name = form.fields[0].trim().to_string();
-                                if name.is_empty() {
-                                    form.error = Some("Name is required.".into());
-                                    form.confirming = false;
-                                    continue;
-                                }
-                                match config::profile_name_exists(&name) {
-                                    Ok(true) => {
-                                        form.error =
-                                            Some(format!("Profile '{}' already exists.", name));
+                                let final_name = match validate_form_name(form, &app.profiles) {
+                                    Ok(name) => name,
+                                    Err(message) => {
+                                        form.error = Some(message);
                                         form.confirming = false;
                                         continue;
                                     }
-                                    Ok(false) => {}
-                                    Err(e) => {
-                                        form.error = Some(format!("Error: {e:#}"));
-                                        form.confirming = false;
-                                        continue;
-                                    }
-                                }
-                                let new_profile = form.to_new_profile();
-                                if let Err(e) = config::append_profile(&new_profile) {
-                                    form.error = Some(format!("Save failed: {e:#}"));
+                                };
+
+                                if let Err(message) = save_form(form) {
+                                    form.error = Some(message);
                                     form.confirming = false;
                                     continue;
                                 }
-                                // Reload and auto-select
-                                match config::load_profiles() {
-                                    Ok(updated) => {
-                                        app.selected = updated.len().saturating_sub(1);
-                                        app.profiles = updated;
-                                    }
-                                    Err(e) => {
-                                        eprintln!("Warning: reload failed: {e:#}");
-                                    }
-                                }
-                                app.mode = AppMode::Normal;
+
+                                post_save_select = Some(final_name);
                             }
                             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                                 form.confirming = false;
@@ -218,6 +252,20 @@ fn run_tui() -> Result<()> {
                     }
                 }
             }
+
+            if let Some(final_name) = post_save_select {
+                match reload_profiles_and_select(&mut app, &final_name) {
+                    Ok(()) => {
+                        app.mode = AppMode::Normal;
+                    }
+                    Err(e) => {
+                        if let AppMode::AddForm(form) = &mut app.mode {
+                            form.error = Some(format!("Reload failed: {e:#}"));
+                            form.confirming = false;
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -226,6 +274,7 @@ fn run_tui() -> Result<()> {
 mod tests {
     use super::*;
     use clap::Parser;
+    use serial_test::serial;
 
     #[test]
     fn clap_routing_no_subcommand() {
@@ -239,5 +288,135 @@ mod tests {
         // "cct add" → command should be Some(Commands::Add)
         let cli = Cli::try_parse_from(["cct", "add"]).unwrap();
         assert!(matches!(cli.command, Some(Commands::Add)));
+    }
+
+    #[test]
+    fn e_key_enters_prefilled_edit_form() {
+        let profile = Profile {
+            name: "edit-me".into(),
+            description: Some("Editable".into()),
+            env: Some(std::collections::HashMap::from([(
+                "ANTHROPIC_API_KEY".into(),
+                "sk-ant".into(),
+            )])),
+            extra_args: None,
+            skip_permissions: None,
+            model: Some("claude-sonnet-4-6".into()),
+            backend: config::Backend::Claude,
+            base_url: Some("https://example.com/v1".into()),
+            full_auto: None,
+        };
+        let mut app = App::new(vec![profile]);
+
+        enter_edit_mode(&mut app);
+
+        match &app.mode {
+            AppMode::AddForm(form) => {
+                assert!(form.is_edit);
+                assert_eq!(form.original_name.as_deref(), Some("edit-me"));
+                assert_eq!(form.fields[0], "edit-me");
+                assert_eq!(form.fields[3], "sk-ant");
+            }
+            AppMode::Normal => panic!("expected add form"),
+        }
+    }
+
+    #[test]
+    fn edit_mode_validates_duplicate_rename_and_keeps_unchanged_name() {
+        let profiles = vec![
+            Profile {
+                name: "alpha".into(),
+                description: None,
+                env: None,
+                extra_args: None,
+                skip_permissions: None,
+                model: None,
+                backend: config::Backend::Claude,
+                base_url: None,
+                full_auto: None,
+            },
+            Profile {
+                name: "beta".into(),
+                description: None,
+                env: None,
+                extra_args: None,
+                skip_permissions: None,
+                model: None,
+                backend: config::Backend::Claude,
+                base_url: None,
+                full_auto: None,
+            },
+        ];
+
+        let mut unchanged = FormState::new();
+        unchanged.is_edit = true;
+        unchanged.original_name = Some("alpha".into());
+        unchanged.fields[0] = "alpha".into();
+        assert_eq!(validate_form_name(&unchanged, &profiles).unwrap(), "alpha");
+
+        let mut duplicate = FormState::new();
+        duplicate.is_edit = true;
+        duplicate.original_name = Some("alpha".into());
+        duplicate.fields[0] = "beta".into();
+        assert_eq!(
+            validate_form_name(&duplicate, &profiles).unwrap_err(),
+            "Profile 'beta' already exists."
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn edit_mode_save_reloads_and_reselects_updated_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(
+            &path,
+            r#"[[profiles]]
+name = "first"
+description = "First profile"
+
+[[profiles]]
+name = "second"
+description = "Second profile"
+"#,
+        )
+        .unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let profiles = config::load_profiles().unwrap();
+        let mut app = App::new(profiles);
+        app.selected = 0;
+        enter_edit_mode(&mut app);
+
+        let profiles_snapshot = app.profiles.clone();
+        let final_name = if let AppMode::AddForm(form) = &mut app.mode {
+            form.fields[0] = "renamed".into();
+            form.fields[1] = "Updated description".into();
+            let final_name = validate_form_name(form, &profiles_snapshot).unwrap();
+            save_form(form).unwrap();
+            final_name
+        } else {
+            panic!("expected add form");
+        };
+
+        reload_profiles_and_select(&mut app, &final_name).unwrap();
+
+        assert_eq!(app.selected, 0);
+        assert_eq!(app.profiles[0].name, "renamed");
+        assert_eq!(
+            app.profiles[0].description.as_deref(),
+            Some("Updated description")
+        );
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    fn readme_documents_inline_edit_keybinding() {
+        let readme = include_str!("../README.md");
+        assert!(readme.contains("press `e` to edit it inline"));
+        assert!(readme.contains("| `e` | Edit the selected profile inline |"));
+        assert!(!readme.contains(concat!("Edit ", "config in `$EDITOR`")));
+        assert!(!readme.contains("Hot-reload"));
     }
 }

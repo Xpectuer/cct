@@ -54,6 +54,33 @@ pub fn build_tab_bar(active: &Backend) -> Vec<Line<'static>> {
     ])]
 }
 
+fn form_panel_title(form: &FormState) -> &'static str {
+    if form.is_edit {
+        " Edit Profile "
+    } else {
+        " Add Profile "
+    }
+}
+
+fn confirmation_prompt(form: &FormState) -> &'static str {
+    if form.is_edit {
+        "Save changes to this profile?"
+    } else {
+        "Add this profile?"
+    }
+}
+
+fn normal_footer_text(backend: &Backend) -> &'static str {
+    match backend {
+        Backend::Claude => {
+            " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [c] Resume  [s] Skip-perms  [a] Add  [e] Edit  [q] Quit"
+        }
+        Backend::Codex => {
+            " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [s] Full-auto  [a] Add  [e] Edit  [q] Quit"
+        }
+    }
+}
+
 pub fn draw(app: &App, frame: &mut Frame) {
     // Outer: content area + 1-line footer
     let outer = Layout::default()
@@ -81,9 +108,7 @@ pub fn draw(app: &App, frame: &mut Frame) {
     // --- Profile list (filtered by active_backend) ---
     let filtered = app.filtered_indices();
     let items: Vec<ListItem> = if filtered.is_empty() {
-        vec![ListItem::new(
-            "No profiles. Press 'a' to add or 'e' to edit config.",
-        )]
+        vec![ListItem::new("No profiles. Press 'a' to add one.")]
     } else {
         filtered
             .iter()
@@ -137,7 +162,7 @@ pub fn draw(app: &App, frame: &mut Frame) {
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .title(" Add Profile "),
+                        .title(form_panel_title(form)),
                 )
                 .wrap(Wrap { trim: false });
             frame.render_widget(detail, content[1]);
@@ -157,14 +182,7 @@ pub fn draw(app: &App, frame: &mut Frame) {
 
     // --- Footer ---
     let footer_text = match &app.mode {
-        AppMode::Normal => match app.active_backend {
-            Backend::Claude => {
-                " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [c] Resume  [s] Skip-perms  [a] Add  [e] Edit config  [q] Quit"
-            }
-            Backend::Codex => {
-                " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [s] Full-auto  [a] Add  [e] Edit config  [q] Quit"
-            }
-        },
+        AppMode::Normal => normal_footer_text(&app.active_backend),
         AppMode::AddForm(form) if form.confirming => " [y] Save  [n/Esc] Back",
         AppMode::AddForm(_) => {
             " [Tab/↓] Next field  [Shift-Tab/↑] Prev  [Enter] Confirm  [Esc] Cancel"
@@ -227,7 +245,8 @@ fn build_form_lines(form: &FormState) -> Vec<Line<'static>> {
 
     if form.confirming {
         lines.push(
-            Line::from("Save this profile?").style(Style::default().add_modifier(Modifier::BOLD)),
+            Line::from(confirmation_prompt(form))
+                .style(Style::default().add_modifier(Modifier::BOLD)),
         );
         lines.push(Line::from(""));
         for (i, label) in labels.iter().enumerate() {
@@ -388,23 +407,42 @@ mod tests {
 
     #[test]
     fn ui_footer_shows_add_hint() {
-        // Claude footer
-        let claude_footer =
-            " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [c] Resume  [s] Skip-perms  [a] Add  [e] Edit config  [q] Quit";
+        let claude_footer = normal_footer_text(&Backend::Claude);
         assert!(claude_footer.contains("[a] Add"));
         assert!(claude_footer.contains("[s] Skip-perms"));
         assert!(claude_footer.contains("[c] Resume"));
+        assert!(claude_footer.contains("[e] Edit"));
         assert!(claude_footer.contains("[Tab/1/2] Backend"));
+        assert_eq!(claude_footer.matches("[e] Edit").count(), 1);
 
-        // Codex footer
-        let codex_footer =
-            " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [s] Full-auto  [a] Add  [e] Edit config  [q] Quit";
+        let codex_footer = normal_footer_text(&Backend::Codex);
         assert!(codex_footer.contains("[a] Add"));
         assert!(codex_footer.contains("[s] Full-auto"));
+        assert!(codex_footer.contains("[e] Edit"));
         assert!(
             !codex_footer.contains("[c] Resume"),
             "Codex footer should not show Resume"
         );
+        assert_eq!(codex_footer.matches("[e] Edit").count(), 1);
+    }
+
+    #[test]
+    fn ui_form_title_and_confirmation_reflect_edit_mode() {
+        let add_form = FormState::new();
+        assert_eq!(form_panel_title(&add_form), " Add Profile ");
+
+        let mut add_confirm = FormState::new();
+        add_confirm.confirming = true;
+        let add_lines = build_form_lines(&add_confirm);
+        assert_eq!(add_lines[0].to_string(), "Add this profile?");
+
+        let mut edit_form = FormState::new();
+        edit_form.is_edit = true;
+        assert_eq!(form_panel_title(&edit_form), " Edit Profile ");
+
+        edit_form.confirming = true;
+        let edit_lines = build_form_lines(&edit_form);
+        assert_eq!(edit_lines[0].to_string(), "Save changes to this profile?");
     }
 
     #[test]

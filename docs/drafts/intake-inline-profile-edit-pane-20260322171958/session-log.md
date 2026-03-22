@@ -1,7 +1,7 @@
 ---
 title: "Intake Session Log"
 doc_type: proc
-status: ready
+status: activated
 brief: "Q&A transcript for inline profile edit pane in cct"
 confidence: verified
 created: 2026-03-22
@@ -13,7 +13,7 @@ context_ref: "docs/references/context-inline-profile-edit-pane-20260322171958/"
 # Intake Session Log
 
 **Session**: intake-inline-profile-edit-pane-20260322171958
-**Status**: ready
+**Status**: activated
 
 ## Context Snapshot
 
