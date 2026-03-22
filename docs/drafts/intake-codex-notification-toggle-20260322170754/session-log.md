@@ -1,19 +1,19 @@
 ---
 title: "Intake Session Log"
 doc_type: proc
-status: ready
+status: activated
 brief: "Q&A transcript for cct codex notification toggle via n key"
 confidence: verified
 created: 2026-03-22
 updated: 2026-03-22
-revision: 1
+revision: 2
 context_ref: "docs/references/context-codex-notification-toggle-20260322170754/"
 ---
 
 # Intake Session Log
 
 **Session**: intake-codex-notification-toggle-20260322170754
-**Status**: ready
+**Status**: activated
 
 ## Context Snapshot
 
