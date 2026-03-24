@@ -33,14 +33,14 @@ Requires Rust 1.70+ and a Unix-like OS (uses `exec`).
 
 ## Quick Start
 
-1. Run `cct` once to generate the default config at `~/.config/cc-tui/profiles.toml`.
+1. Run `cct` once to generate the default config, which lands in `~/Library/Application Support/cc-tui/profiles.toml` on macOS and `~/.config/cc-tui/profiles.toml` on Linux or other Unix-like systems.
 2. Add profiles interactively:
 
    **Option A — TUI form**: Run `cct`, then press `a` to open the inline add form. Fill in the 5 fields (Name, Description, Base URL, API Key, Model) and confirm.
 
    **Option B — CLI**: Run `cct add` and answer the prompts.
 
-   **Option C — Manual edit**: Edit `~/.config/cc-tui/profiles.toml` directly in any editor if you prefer working outside the TUI:
+   **Option C — Manual edit**: Edit `~/Library/Application Support/cc-tui/profiles.toml` on macOS or `~/.config/cc-tui/profiles.toml` on Linux/other Unix-like systems if you prefer working outside the TUI:
 
 ```toml
 [[profiles]]

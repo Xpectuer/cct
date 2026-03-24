@@ -1,10 +1,12 @@
+# CLAUDE.md Snapshot
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
-`cct` is a terminal UI launcher for Claude Code and OpenAI Codex. It reads named profiles from a TOML config file (`~/Library/Application Support/cc-tui/profiles.toml` on macOS or `~/.config/cc-tui/profiles.toml` on Linux/other Unix-like systems), displays them in a ratatui TUI organized into Claude/Codex backend tabs, and exec-replaces the process with `claude <args>` or `codex [--full-auto]` when the user selects a profile.
+`cct` is a terminal UI launcher for Claude Code and OpenAI Codex. It reads named profiles from a TOML config file (`~/.config/cc-tui/profiles.toml`), displays them in a ratatui TUI organized into Claude/Codex backend tabs, and exec-replaces the process with `claude <args>` or `codex [--full-auto]` when the user selects a profile.
 
 ## Build & Test Commands
 
@@ -51,7 +53,7 @@ The app is five focused modules with no shared mutable state:
 
 ## Config File Format
 
-Located at `~/Library/Application Support/cc-tui/profiles.toml` on macOS and `~/.config/cc-tui/profiles.toml` on Linux/other Unix-like systems. Each profile block:
+Located at `~/.config/cc-tui/profiles.toml`. Each profile block:
 
 ```toml
 [[profiles]]
