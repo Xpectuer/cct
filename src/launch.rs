@@ -81,6 +81,19 @@ pub fn generate_codex_config(profile: &Profile, codex_home: &Path) -> anyhow::Re
     Ok(())
 }
 
+/// Write `{codex_home}/auth.json` with the OPENAI_API_KEY from the profile's env.
+/// If OPENAI_API_KEY is absent, returns Ok(()) without creating the file.
+pub fn write_codex_auth(profile: &Profile, codex_home: &Path) -> Result<()> {
+    let key = profile.env.as_ref().and_then(|m| m.get("OPENAI_API_KEY"));
+    if let Some(api_key) = key {
+        fs::create_dir_all(codex_home)?;
+        let json =
+            format!("{{\n  \"auth_mode\": \"apikey\",\n  \"OPENAI_API_KEY\": \"{api_key}\"\n}}\n");
+        fs::write(codex_home.join("auth.json"), json)?;
+    }
+    Ok(())
+}
+
 /// Build the CLI argument list for `codex` from a profile. Pure — no side effects.
 pub fn build_codex_args(profile: &Profile) -> Vec<String> {
     let mut args = Vec::new();
@@ -107,6 +120,9 @@ pub fn exec_codex(profile: &Profile) -> anyhow::Error {
         .join(&profile.name);
     if let Err(e) = generate_codex_config(profile, &codex_home) {
         return anyhow::anyhow!("failed to generate codex config: {e}");
+    }
+    if let Err(e) = write_codex_auth(profile, &codex_home) {
+        return anyhow::anyhow!("failed to write codex auth: {e}");
     }
     env::set_var("CODEX_HOME", &codex_home);
     if let Some(env_map) = &profile.env {
@@ -393,6 +409,67 @@ mod tests {
         let (bin2, args2) = build_launch_command(&p, true);
         assert_eq!(bin2, "codex");
         assert_eq!(args2, vec!["--full-auto", "--quiet"]);
+    }
+
+    #[test]
+    fn exec_codex_calls_write_auth() {
+        // write_codex_auth must write auth.json when OPENAI_API_KEY present.
+        // We verify the side-effect directly since exec_codex exits the process.
+        let tmp = tempfile::tempdir().unwrap();
+        let mut env_map = std::collections::HashMap::new();
+        env_map.insert("OPENAI_API_KEY".to_string(), "sk-exec-test".to_string());
+        let mut p = codex_profile("auth-test", None, None, None, None);
+        p.env = Some(env_map);
+        write_codex_auth(&p, tmp.path()).unwrap();
+        let auth_path = tmp.path().join("auth.json");
+        assert!(
+            auth_path.exists(),
+            "auth.json must exist after write_codex_auth"
+        );
+        let content = std::fs::read_to_string(&auth_path).unwrap();
+        assert!(content.contains("sk-exec-test"));
+    }
+
+    #[test]
+    fn write_codex_auth_overwrites_existing() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Write stale content first
+        std::fs::write(
+            tmp.path().join("auth.json"),
+            r#"{"openai_api_key":"old-key"}"#,
+        )
+        .unwrap();
+
+        let mut env_map = std::collections::HashMap::new();
+        env_map.insert("OPENAI_API_KEY".to_string(), "sk-new456".to_string());
+        let mut p = codex_profile("test", None, None, None, None);
+        p.env = Some(env_map);
+        write_codex_auth(&p, tmp.path()).unwrap();
+
+        let content = std::fs::read_to_string(tmp.path().join("auth.json")).unwrap();
+        assert!(content.contains("\"OPENAI_API_KEY\": \"sk-new456\""));
+    }
+
+    #[test]
+    fn write_codex_auth_skips_when_no_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = codex_profile("test", None, None, None, None); // env is None
+        write_codex_auth(&p, tmp.path()).unwrap();
+        assert!(!tmp.path().join("auth.json").exists());
+    }
+
+    #[test]
+    fn write_codex_auth_writes_correct_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut env_map = std::collections::HashMap::new();
+        env_map.insert("OPENAI_API_KEY".to_string(), "sk-test123".to_string());
+        let mut p = codex_profile("test", None, None, None, None);
+        p.env = Some(env_map);
+        write_codex_auth(&p, tmp.path()).unwrap();
+
+        let content = std::fs::read_to_string(tmp.path().join("auth.json")).unwrap();
+        assert!(content.contains("\"auth_mode\": \"apikey\""));
+        assert!(content.contains("\"OPENAI_API_KEY\": \"sk-test123\""));
     }
 
     #[test]

@@ -106,6 +106,7 @@ Other docs:
 - [install-script reference](docs/references/install-script.md) — curl|bash installer functions and test coverage
 - [BATS stubbing lesson](docs/lessons/bats-shell-function-stubbing.md) — export -f pattern for shell test isolation
 - [Form field index single source of truth](docs/lessons/form-field-index-single-source-of-truth.md) — why polymorphic field buffers need a single mapping function
+- [External tool config schema must be verified](docs/lessons/external-tool-config-schema-must-be-verified.md) — auth.json key casing and required fields must be confirmed from a working example, not guessed
 
 See also: [ARCHITECTURE.md](ARCHITECTURE.md) for the system-level overview.
 <!-- END:module-docs -->
