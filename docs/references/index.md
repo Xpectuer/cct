@@ -14,3 +14,4 @@
 | 2026-03-15 23:52:48 | intake-codex-full-auto-20260315235248 | 4 | [context](./context-20260315235248/) |
 | 2026-03-15 23:57:54 | intake-20260315235754 | 4 | [context](./context-codex-fullauto-toggle-20260315235754/) |
 | 2026-03-25 11:03:28 | intake-codex-edit-apikey-20260325110328 | 4 | [context](./context-codex-api-key-edit-20260325110328/) |
+| 2026-04-03 00:32:14 | intake-20260403003214 | 4 | [context](./context-agentfirst-complete-cli-cct-20260403003214/) |
