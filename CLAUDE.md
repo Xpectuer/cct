@@ -26,6 +26,11 @@ CCT_LIVE_TESTS=1 cargo test --test live
 bats tests/install.bats
 ```
 
+## Local Shell Notes
+
+- On this machine, Cargo is already initialized from `~/path_variables.zsh` via `. "$HOME/.cargo/env"`.
+- `~/.zshrc` sources `~/path_variables.zsh`, so do not add a second Cargo init line directly to `~/.zshrc` unless explicitly requested.
+
 ## Architecture
 
 The app is five focused modules with no shared mutable state:
