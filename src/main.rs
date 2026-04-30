@@ -40,14 +40,18 @@ fn main() -> Result<()> {
 }
 
 fn enter_add_mode(app: &mut App) {
-    app.mode = AppMode::AddForm(FormState::new_for_backend(app.active_backend.clone()));
+    app.mode = AppMode::AddForm(Box::new(FormState::new_for_backend(
+        app.active_backend.clone(),
+    )));
 }
 
 fn enter_edit_mode(app: &mut App) {
     if app.profiles.is_empty() {
         return;
     }
-    app.mode = AppMode::AddForm(FormState::from_profile(&app.profiles[app.selected]));
+    app.mode = AppMode::AddForm(Box::new(FormState::from_profile(
+        &app.profiles[app.selected],
+    )));
 }
 
 fn validate_form_name(
@@ -238,7 +242,7 @@ fn run_tui() -> Result<()> {
                             KeyCode::Tab | KeyCode::Down => form.next_field(),
                             KeyCode::BackTab | KeyCode::Up => form.prev_field(),
                             KeyCode::Enter => {
-                                if form.active_field < 4 {
+                                if form.active_field < 5 {
                                     form.next_field();
                                 } else {
                                     form.confirming = true;

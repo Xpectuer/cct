@@ -99,6 +99,7 @@ pub struct NewProfile {
     pub base_url: Option<String>,
     pub api_key: Option<String>,
     pub model: Option<String>,
+    pub fast_model: Option<String>,
     pub backend: Backend,
     pub full_auto: Option<bool>,
 }
@@ -183,24 +184,38 @@ pub fn update_profile(original_name: &str, updated: &NewProfile) -> Result<()> {
             if let Some(model) = non_empty(&updated.model) {
                 for key in [
                     "ANTHROPIC_MODEL",
-                    "ANTHROPIC_SMALL_FAST_MODEL",
                     "ANTHROPIC_DEFAULT_SONNET_MODEL",
                     "ANTHROPIC_DEFAULT_OPUS_MODEL",
-                    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+                    "CLAUDE_CODE_SUBAGENT_MODEL",
                 ] {
                     env[key] = value(model);
                 }
                 env["API_TIMEOUT_MS"] = value("600000");
                 env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = value("1");
+                env["CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK"] = value("1");
+                env["CLAUDE_CODE_EFFORT_LEVEL"] = value("max");
             } else {
                 for key in [
                     "ANTHROPIC_MODEL",
-                    "ANTHROPIC_SMALL_FAST_MODEL",
                     "ANTHROPIC_DEFAULT_SONNET_MODEL",
                     "ANTHROPIC_DEFAULT_OPUS_MODEL",
-                    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+                    "CLAUDE_CODE_SUBAGENT_MODEL",
                     "API_TIMEOUT_MS",
                     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+                    "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK",
+                    "CLAUDE_CODE_EFFORT_LEVEL",
+                ] {
+                    env.remove(key);
+                }
+            }
+
+            if let Some(fm) = non_empty(&updated.fast_model) {
+                env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = value(fm);
+                env["ANTHROPIC_SMALL_FAST_MODEL"] = value(fm);
+            } else {
+                for key in [
+                    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+                    "ANTHROPIC_SMALL_FAST_MODEL",
                 ] {
                     env.remove(key);
                 }
@@ -249,12 +264,12 @@ pub fn append_profile(profile: &NewProfile) -> Result<()> {
 
     match profile.backend {
         Backend::Claude => {
-            // Build [profiles.env] section when base_url, api_key, or model are provided
             let base_url = non_empty(&profile.base_url);
             let api_key = non_empty(&profile.api_key);
             let model = non_empty(&profile.model);
+            let fast_model = non_empty(&profile.fast_model);
 
-            if base_url.is_some() || api_key.is_some() || model.is_some() {
+            if base_url.is_some() || api_key.is_some() || model.is_some() || fast_model.is_some() {
                 block.push_str("\n[profiles.env]\n");
                 if let Some(url) = base_url {
                     block.push_str(&format!("ANTHROPIC_BASE_URL = {:?}\n", url));
@@ -264,12 +279,17 @@ pub fn append_profile(profile: &NewProfile) -> Result<()> {
                 }
                 if let Some(m) = model {
                     block.push_str(&format!("ANTHROPIC_MODEL = {:?}\n", m));
-                    block.push_str(&format!("ANTHROPIC_SMALL_FAST_MODEL = {:?}\n", m));
                     block.push_str(&format!("ANTHROPIC_DEFAULT_SONNET_MODEL = {:?}\n", m));
                     block.push_str(&format!("ANTHROPIC_DEFAULT_OPUS_MODEL = {:?}\n", m));
-                    block.push_str(&format!("ANTHROPIC_DEFAULT_HAIKU_MODEL = {:?}\n", m));
+                    block.push_str(&format!("CLAUDE_CODE_SUBAGENT_MODEL = {:?}\n", m));
                     block.push_str("API_TIMEOUT_MS = \"600000\"\n");
                     block.push_str("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = \"1\"\n");
+                    block.push_str("CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK = \"1\"\n");
+                    block.push_str("CLAUDE_CODE_EFFORT_LEVEL = \"max\"\n");
+                }
+                if let Some(fm) = fast_model {
+                    block.push_str(&format!("ANTHROPIC_DEFAULT_HAIKU_MODEL = {:?}\n", fm));
+                    block.push_str(&format!("ANTHROPIC_SMALL_FAST_MODEL = {:?}\n", fm));
                 }
             }
         }
@@ -402,6 +422,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             base_url: None,
             api_key: None,
             model: Some("claude-sonnet-4-6".into()),
+            fast_model: None,
             backend: Backend::Claude,
             full_auto: None,
         };
@@ -428,6 +449,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             base_url: None,
             api_key: None,
             model: None,
+            fast_model: None,
             backend: Backend::Claude,
             full_auto: None,
         };
@@ -469,6 +491,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             base_url: Some("https://api.example.com".into()),
             api_key: Some("sk-test-key-123".into()),
             model: Some("kimi-k2".into()),
+            fast_model: None,
             backend: Backend::Claude,
             full_auto: None,
         };
@@ -497,10 +520,6 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             "Expected ANTHROPIC_MODEL in output"
         );
         assert!(
-            content.contains("ANTHROPIC_SMALL_FAST_MODEL"),
-            "Expected ANTHROPIC_SMALL_FAST_MODEL in output"
-        );
-        assert!(
             content.contains("ANTHROPIC_DEFAULT_SONNET_MODEL"),
             "Expected ANTHROPIC_DEFAULT_SONNET_MODEL in output"
         );
@@ -509,8 +528,8 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             "Expected ANTHROPIC_DEFAULT_OPUS_MODEL in output"
         );
         assert!(
-            content.contains("ANTHROPIC_DEFAULT_HAIKU_MODEL"),
-            "Expected ANTHROPIC_DEFAULT_HAIKU_MODEL in output"
+            content.contains("CLAUDE_CODE_SUBAGENT_MODEL"),
+            "Expected CLAUDE_CODE_SUBAGENT_MODEL in output"
         );
         assert!(
             content.contains("API_TIMEOUT_MS"),
@@ -519,6 +538,23 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
         assert!(
             content.contains("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"),
             "Expected CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC in output"
+        );
+        assert!(
+            content.contains("CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK"),
+            "Expected CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK in output"
+        );
+        assert!(
+            content.contains("CLAUDE_CODE_EFFORT_LEVEL"),
+            "Expected CLAUDE_CODE_EFFORT_LEVEL in output"
+        );
+        // fast_model is None, so HAIKU_MODEL and SMALL_FAST_MODEL should NOT be present
+        assert!(
+            !content.contains("ANTHROPIC_DEFAULT_HAIKU_MODEL"),
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL should NOT be present when fast_model is None"
+        );
+        assert!(
+            !content.contains("ANTHROPIC_SMALL_FAST_MODEL"),
+            "ANTHROPIC_SMALL_FAST_MODEL should NOT be present when fast_model is None"
         );
 
         // Verify the profile round-trips through TOML parsing
@@ -555,6 +591,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             base_url: Some("https://api.third-party.com/v1".into()),
             api_key: None,
             model: None,
+            fast_model: None,
             backend: Backend::Claude,
             full_auto: None,
         };
@@ -614,6 +651,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             base_url: None,
             api_key: None,
             model: None,
+            fast_model: None,
             backend: Backend::Claude,
             full_auto: None,
         };
@@ -724,6 +762,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             base_url: None,
             api_key: None,
             model: None,
+            fast_model: None,
             backend: Backend::Claude,
             full_auto: None,
         };
@@ -891,6 +930,7 @@ base_url = "https://api.example.com/v1"
             base_url: Some("https://api.openai.com/v1".into()),
             api_key: Some("sk-openai-key-123".into()),
             model: Some("o3".into()),
+            fast_model: None,
             backend: Backend::Codex,
             full_auto: Some(true),
         };
@@ -960,6 +1000,7 @@ OPENAI_API_KEY = "sk-old"
             base_url: Some("https://new.example/v1".into()),
             api_key: Some("sk-new".into()),
             model: Some("gpt-5.4".into()),
+            fast_model: None,
             backend: Backend::Codex,
             full_auto: Some(true),
         };
@@ -1004,12 +1045,13 @@ base_url = "https://old.example/v1"
 ANTHROPIC_BASE_URL = "https://old.example/v1"
 ANTHROPIC_API_KEY = "sk-old"
 ANTHROPIC_MODEL = "old-model"
-ANTHROPIC_SMALL_FAST_MODEL = "old-model"
 ANTHROPIC_DEFAULT_SONNET_MODEL = "old-model"
 ANTHROPIC_DEFAULT_OPUS_MODEL = "old-model"
-ANTHROPIC_DEFAULT_HAIKU_MODEL = "old-model"
+CLAUDE_CODE_SUBAGENT_MODEL = "old-model"
 API_TIMEOUT_MS = "600000"
 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK = "1"
+CLAUDE_CODE_EFFORT_LEVEL = "max"
 CUSTOM_HEADER = "keep-me"
 "#,
         )
@@ -1022,6 +1064,7 @@ CUSTOM_HEADER = "keep-me"
             base_url: Some("https://new.example/v1".into()),
             api_key: Some("sk-new".into()),
             model: Some("new-model".into()),
+            fast_model: None,
             backend: Backend::Claude,
             full_auto: None,
         };
@@ -1045,6 +1088,28 @@ CUSTOM_HEADER = "keep-me"
         assert_eq!(
             env.get("ANTHROPIC_MODEL").map(String::as_str),
             Some("new-model")
+        );
+        assert_eq!(
+            env.get("CLAUDE_CODE_SUBAGENT_MODEL").map(String::as_str),
+            Some("new-model")
+        );
+        assert_eq!(
+            env.get("CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            env.get("CLAUDE_CODE_EFFORT_LEVEL").map(String::as_str),
+            Some("max")
+        );
+        // fast_model is None, so HAIKU_MODEL and SMALL_FAST_MODEL should be removed
+        assert!(
+            env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL").is_none(),
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL should be removed when fast_model is None"
+        );
+        assert!(
+            env.get("ANTHROPIC_SMALL_FAST_MODEL").is_none(),
+            "ANTHROPIC_SMALL_FAST_MODEL should be removed when fast_model is None"
         );
 
         std::env::remove_var("CCT_CONFIG");
@@ -1075,6 +1140,7 @@ description = "Second profile"
             base_url: None,
             api_key: None,
             model: None,
+            fast_model: None,
             backend: Backend::Claude,
             full_auto: None,
         };
@@ -1107,6 +1173,7 @@ description = "Second profile"
             base_url: None,
             api_key: None,
             model: None,
+            fast_model: None,
             backend: Backend::Claude,
             full_auto: None,
         };

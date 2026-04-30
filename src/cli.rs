@@ -90,6 +90,20 @@ pub fn run_add_with<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> Resul
         }
     };
 
+    // Fast Model (optional)
+    write!(writer, "Fast Model (optional, for Haiku/SmallFast tier): ")?;
+    writer.flush()?;
+    let mut fast_model_line = String::new();
+    reader.read_line(&mut fast_model_line)?;
+    let fast_model = {
+        let t = fast_model_line.trim().to_string();
+        if t.is_empty() {
+            None
+        } else {
+            Some(t)
+        }
+    };
+
     // Summary
     writeln!(writer)?;
     writeln!(writer, "--- New Profile ---")?;
@@ -117,6 +131,11 @@ pub fn run_add_with<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> Resul
         "  Model:       {}",
         model.as_deref().unwrap_or("(none)")
     )?;
+    writeln!(
+        writer,
+        "  Fast Model:  {}",
+        fast_model.as_deref().unwrap_or("(none)")
+    )?;
     writeln!(writer)?;
 
     // Confirm
@@ -135,6 +154,7 @@ pub fn run_add_with<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> Resul
         base_url,
         api_key,
         model,
+        fast_model,
         backend: config::Backend::Claude,
         full_auto: None,
     };
@@ -160,8 +180,8 @@ mod tests {
         assert!(config::profile_name_exists("existing").unwrap());
         assert!(config::profile_name_exists("EXISTING").unwrap());
 
-        // Test that a valid add flow works (5 fields: name, desc, base_url, api_key, model)
-        let input = b"newprofile\nmy desc\nhttps://api.example.com\nsk-test\nMiniMax-M2.1\ny\n";
+        // Test that a valid add flow works (6 fields: name, desc, base_url, api_key, model, fast_model)
+        let input = b"newprofile\nmy desc\nhttps://api.example.com\nsk-test\nMiniMax-M2.1\n\ny\n";
         let mut output: Vec<u8> = Vec::new();
         run_add_with(&input[..], &mut output).unwrap();
 
@@ -186,8 +206,8 @@ mod tests {
         std::fs::write(&path, "[[profiles]]\nname = \"existing\"\n").unwrap();
         std::env::set_var("CCT_CONFIG", &path);
 
-        // Input: name, desc, base_url, api_key, model, confirm
-        let input = b"cli-test\nsome desc\n\n\n\ny\n";
+        // Input: name, desc, base_url, api_key, model, fast_model, confirm
+        let input = b"cli-test\nsome desc\n\n\n\n\ny\n";
         let mut output: Vec<u8> = Vec::new();
         run_add_with(&input[..], &mut output).unwrap();
 

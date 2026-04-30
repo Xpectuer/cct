@@ -1,21 +1,33 @@
 use crate::config::{Backend, NewProfile, Profile};
 
-pub fn field_labels(backend: &Backend) -> [&'static str; 5] {
+pub fn field_labels(backend: &Backend) -> [&'static str; 6] {
     match backend {
-        Backend::Claude => ["Name *", "Description", "Base URL", "API Key", "Model"],
-        Backend::Codex => ["Name *", "Base URL", "API Key", "Model", "Full Auto (y/n)"],
+        Backend::Claude => [
+            "Name *",
+            "Description",
+            "Base URL",
+            "API Key",
+            "Pro Model",
+            "Fast Model",
+        ],
+        Backend::Codex => [
+            "Name *",
+            "Base URL",
+            "API Key",
+            "Model",
+            "Full Auto (y/n)",
+            "",
+        ],
     }
 }
 
-pub const FIELD_LABELS: [&str; 5] = ["Name *", "Description", "Base URL", "API Key", "Model"];
-
 pub enum AppMode {
     Normal,
-    AddForm(FormState),
+    AddForm(Box<FormState>),
 }
 
 pub struct FormState {
-    pub fields: [String; 5],
+    pub fields: [String; 6],
     pub active_field: usize,
     pub confirming: bool,
     pub error: Option<String>,
@@ -38,6 +50,7 @@ impl FormState {
     pub fn new_for_backend(backend: Backend) -> Self {
         Self {
             fields: [
+                String::new(),
                 String::new(),
                 String::new(),
                 String::new(),
@@ -74,6 +87,12 @@ impl FormState {
                         env.and_then(|map| map.get("ANTHROPIC_MODEL").cloned())
                             .unwrap_or_default()
                     }),
+                    env.and_then(|map| {
+                        map.get("ANTHROPIC_DEFAULT_HAIKU_MODEL")
+                            .or_else(|| map.get("ANTHROPIC_SMALL_FAST_MODEL"))
+                            .cloned()
+                    })
+                    .unwrap_or_default(),
                 ];
             }
             Backend::Codex => {
@@ -89,6 +108,7 @@ impl FormState {
                     } else {
                         "n".into()
                     },
+                    String::new(),
                 ];
             }
         }
@@ -97,7 +117,7 @@ impl FormState {
     }
 
     pub fn next_field(&mut self) {
-        self.active_field = (self.active_field + 1).min(4);
+        self.active_field = (self.active_field + 1).min(5);
     }
 
     pub fn prev_field(&mut self) {
@@ -114,6 +134,7 @@ impl FormState {
                 let base_url = self.fields[2].trim().to_string();
                 let api_key = self.fields[3].trim().to_string();
                 let model = self.fields[4].trim().to_string();
+                let fast_model = self.fields[5].trim().to_string();
                 NewProfile {
                     name,
                     description: if desc.is_empty() { None } else { Some(desc) },
@@ -128,6 +149,11 @@ impl FormState {
                         Some(api_key)
                     },
                     model: if model.is_empty() { None } else { Some(model) },
+                    fast_model: if fast_model.is_empty() {
+                        None
+                    } else {
+                        Some(fast_model)
+                    },
                     backend: Backend::Claude,
                     full_auto: None,
                 }
@@ -152,6 +178,7 @@ impl FormState {
                         Some(api_key)
                     },
                     model: if model.is_empty() { None } else { Some(model) },
+                    fast_model: None,
                     backend: Backend::Codex,
                     full_auto: Some(full_auto),
                 }
@@ -240,8 +267,14 @@ mod tests {
         form.next_field();
         assert_eq!(form.active_field, 4);
 
-        // Should clamp at max (4)
         form.next_field();
+        assert_eq!(form.active_field, 5);
+
+        // Should clamp at max (5)
+        form.next_field();
+        assert_eq!(form.active_field, 5);
+
+        form.prev_field();
         assert_eq!(form.active_field, 4);
 
         form.prev_field();
@@ -268,7 +301,7 @@ mod tests {
 
         // Transition to AddForm
         let mut app = App::new(vec![]);
-        app.mode = AppMode::AddForm(FormState::new());
+        app.mode = AppMode::AddForm(Box::new(FormState::new()));
         match &app.mode {
             AppMode::AddForm(form) => {
                 assert_eq!(form.active_field, 0);
@@ -365,39 +398,65 @@ mod tests {
         let claude_labels = field_labels(&Backend::Claude);
         assert_eq!(
             claude_labels,
-            ["Name *", "Description", "Base URL", "API Key", "Model"]
+            [
+                "Name *",
+                "Description",
+                "Base URL",
+                "API Key",
+                "Pro Model",
+                "Fast Model"
+            ]
         );
 
         let codex_labels = field_labels(&Backend::Codex);
         assert_eq!(
             codex_labels,
-            ["Name *", "Base URL", "API Key", "Model", "Full Auto (y/n)"]
+            [
+                "Name *",
+                "Base URL",
+                "API Key",
+                "Model",
+                "Full Auto (y/n)",
+                ""
+            ]
         );
     }
 
     #[test]
-    fn form_state_five_fields() {
-        // FIELD_LABELS should have exactly 5 entries with correct labels
-        assert_eq!(FIELD_LABELS.len(), 5, "FIELD_LABELS must have 5 entries");
+    fn form_state_six_fields() {
+        // field_labels for Claude should have 6 entries
+        let claude_labels = field_labels(&Backend::Claude);
         assert_eq!(
-            FIELD_LABELS,
-            ["Name *", "Description", "Base URL", "API Key", "Model"]
+            claude_labels.len(),
+            6,
+            "Claude field_labels must have 6 entries"
+        );
+        assert_eq!(
+            claude_labels,
+            [
+                "Name *",
+                "Description",
+                "Base URL",
+                "API Key",
+                "Pro Model",
+                "Fast Model"
+            ]
         );
 
-        // FormState.fields should have 5 elements
+        // FormState.fields should have 6 elements
         let form = FormState::new();
         assert_eq!(
             form.fields.len(),
-            5,
-            "FormState.fields must have 5 elements"
+            6,
+            "FormState.fields must have 6 elements"
         );
 
-        // next_field should clamp at 4 (index of last field)
+        // next_field should clamp at 5 (index of last field)
         let mut form = FormState::new();
         for _ in 0..10 {
             form.next_field();
         }
-        assert_eq!(form.active_field, 4, "next_field must clamp at 4");
+        assert_eq!(form.active_field, 5, "next_field must clamp at 5");
     }
 
     /// Invariant: for every backend, field_labels()[i] describes what
@@ -416,7 +475,8 @@ mod tests {
         form.fields[1] = "A description".into(); // labels[1] = "Description"
         form.fields[2] = "https://example.com".into(); // labels[2] = "Base URL"
         form.fields[3] = "sk-secret-123".into(); // labels[3] = "API Key"
-        form.fields[4] = "claude-opus".into(); // labels[4] = "Model"
+        form.fields[4] = "claude-opus".into(); // labels[4] = "Pro Model"
+        form.fields[5] = "claude-haiku".into(); // labels[5] = "Fast Model"
 
         let np = form.to_new_profile();
 
@@ -435,6 +495,9 @@ mod tests {
 
         assert!(labels[4].contains("Model"));
         assert_eq!(np.model.as_deref(), Some("claude-opus"));
+
+        assert!(labels[5].contains("Fast"));
+        assert_eq!(np.fast_model.as_deref(), Some("claude-haiku"));
 
         assert_eq!(np.backend, Backend::Claude);
         assert!(np.full_auto.is_none());
@@ -471,6 +534,7 @@ mod tests {
                 "https://example.com/v1".to_string(),
                 "sk-ant-123".to_string(),
                 "claude-sonnet-4-6".to_string(),
+                String::new(),
             ]
         );
     }
@@ -506,6 +570,7 @@ mod tests {
                 "sk-openai-123".to_string(),
                 "gpt-5.4".to_string(),
                 "y".to_string(),
+                String::new(),
             ]
         );
     }

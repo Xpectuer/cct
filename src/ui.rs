@@ -321,8 +321,8 @@ mod tests {
         form.active_field = 0;
 
         let lines = build_form_lines(&form);
-        // Should have 5 lines (one per field)
-        assert_eq!(lines.len(), 5);
+        // Should have 6 lines (one per field)
+        assert_eq!(lines.len(), 6);
 
         // Active field should have "> " prefix
         let first = lines[0].to_string();
