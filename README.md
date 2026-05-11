@@ -12,6 +12,7 @@ A terminal UI for managing and launching [Claude Code](https://claude.ai/code) w
 - **skip_permissions toggle** — press `s` to toggle `--dangerously-skip-permissions` on the selected profile; the profile row turns red as a visual warning; the change is persisted immediately to `profiles.toml`
 - **Autoinstall** — if `claude` is not found in PATH on startup, `cct` offers to install it via `curl -fsSL https://claude.ai/install.sh | bash`
 - **Inline profile editing** — press `e` on a selected profile to open a prefilled edit form, update the fields inline, and save back to `profiles.toml`
+- **Direct config editing** — run `cct edit` to open `profiles.toml` directly in `$EDITOR` (or `vi`), bypassing the TUI entirely
 - **Zero overhead** — `exec()` replaces the process; no parent lingers
 
 ## Install
@@ -40,7 +41,7 @@ Requires Rust 1.70+ and a Unix-like OS (uses `exec`).
 
    **Option B — CLI**: Run `cct add` and answer the prompts.
 
-   **Option C — Manual edit**: Edit `~/Library/Application Support/cc-tui/profiles.toml` on macOS or `~/.config/cc-tui/profiles.toml` on Linux/other Unix-like systems if you prefer working outside the TUI:
+   **Option C — Manual edit**: Run `cct edit` to open the config directly in your editor, or manually edit `~/Library/Application Support/cc-tui/profiles.toml` on macOS or `~/.config/cc-tui/profiles.toml` on Linux/other Unix-like systems:
 
 ```toml
 [[profiles]]
@@ -63,7 +64,7 @@ API_TIMEOUT_MS = "600000"
 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
 ```
 
-3. Run `cct`, select a profile, and press `e` to edit it inline or `Enter` to launch it.
+3. Run `cct`, select a profile, and press `e` to edit it inline or `Enter` to launch it. To edit the raw config file directly, run `cct edit`.
 
 ## Keybindings
 
@@ -112,7 +113,7 @@ Five focused modules, no shared mutable state:
 | `app` | Cursor state, circular navigation, `AppMode` (Normal / AddForm), `FormState` for the 5-field add form |
 | `ui` | ratatui rendering, 35/65 split layout, value masking, inline add-form rendering |
 | `launch` | CLI arg building, exec-replace, editor open |
-| `cli` | `cct add` interactive CLI flow (5 prompts, masked summary, duplicate guard) |
+| `cli` | `cct add` and `cct edit` subcommands — 5 prompts, masked summary, duplicate guard; open config in `$EDITOR` |
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for details.
 

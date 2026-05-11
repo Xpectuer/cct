@@ -3,14 +3,14 @@ doc_type: module
 module_name: "cli"
 module_path: "src/cli.rs"
 generated_by: mci-phase-2
-revision: 1
-updated: 2026-03-15
+revision: 2
+updated: 2026-05-11
 ---
 
 # cli Module Documentation
 
-> **Purpose**: Implements the `cct add` subcommand — an interactive 5-prompt CLI flow that collects profile fields, shows a masked summary, and calls `config::append_profile` on user confirmation.
-> **Path**: src/cli.rs
+> **Purpose**: Implements the `cct add` and `cct edit` subcommands. `cct add` runs an interactive 5-prompt CLI flow that collects profile fields, shows a masked summary, and calls `config::append_profile` on user confirmation. `cct edit` directly opens `profiles.toml` in `$EDITOR` (dispatched from `main.rs` via `launch::open_editor`).
+> **Path**: src/cli.rs (add); main.rs — `Some(Commands::Edit)` arm (edit)
 
 ---
 
@@ -101,9 +101,10 @@ The only persistent side effect is the file write performed by `config::append_p
 ## 5. Usage Example
 
 ```rust
-// In main.rs — routing to the CLI add flow:
+// In main.rs — routing for CLI subcommands:
 match args.command {
-    Some(Commands::Add) => cli::run_add(),  // delegates to run_add_with(stdin, stdout)
+    Some(Commands::Add) => cli::run_add(),                                       // delegates to run_add_with(stdin, stdout)
+    Some(Commands::Edit) => launch::open_editor(&config::config_path()),         // opens profiles.toml in $EDITOR
     None => run_tui(),
 }
 

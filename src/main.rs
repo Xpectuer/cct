@@ -23,6 +23,8 @@ struct Cli {
 enum Commands {
     /// Add a new profile interactively
     Add,
+    /// Open profiles.toml in $EDITOR
+    Edit,
 }
 
 fn main() -> Result<()> {
@@ -35,6 +37,7 @@ fn main() -> Result<()> {
     let args = Cli::parse();
     match args.command {
         Some(Commands::Add) => cli::run_add(),
+        Some(Commands::Edit) => launch::open_editor(&config::config_path()),
         None => run_tui(),
     }
 }
@@ -292,6 +295,13 @@ mod tests {
         // "cct add" → command should be Some(Commands::Add)
         let cli = Cli::try_parse_from(["cct", "add"]).unwrap();
         assert!(matches!(cli.command, Some(Commands::Add)));
+    }
+
+    #[test]
+    fn clap_routing_edit_subcommand() {
+        // "cct edit" → command should be Some(Commands::Edit)
+        let cli = Cli::try_parse_from(["cct", "edit"]).unwrap();
+        assert!(matches!(cli.command, Some(Commands::Edit)));
     }
 
     #[test]

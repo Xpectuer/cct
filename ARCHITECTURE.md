@@ -126,6 +126,16 @@ cct add
       → config::append_profile(&NewProfile { ... })
 ```
 
+### Edit Config — CLI (`cct edit`)
+```
+cct edit
+  → launch::open_editor(&config::config_path())
+      → env::var("EDITOR").unwrap_or("vi")
+      → Command::new(editor).arg(config_path).status()
+      → blocks until editor exits
+      → no TUI involved — runs before raw mode / alternate screen
+```
+
 ### Toggle skip_permissions (key `s`)
 ```
 User presses [s] (mode = Normal, profiles non-empty)
