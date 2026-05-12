@@ -129,6 +129,7 @@ References:
 - [install-script reference](docs/references/install-script.md) — curl|bash installer functions and test coverage
 - [Codex backend development guide](docs/references/codex-backend-development-guide.md) — config schema, validation, UI behavior, launch flow, and full_auto toggling
 - [Codex CODEX_HOME storage layout](docs/references/codex-home-storage-layout.md) — per-profile Codex state files and sqlite schema observations
+- [Context snapshot index](docs/references/index.md) — session context snapshots and cross-references
 
 Quality:
 - [Codebase review](docs/quality/codebase-review.md) — gap analysis, risk assessment, and AI usability score

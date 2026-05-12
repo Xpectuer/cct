@@ -6,6 +6,7 @@ confidence: speculative
 created: 2026-03-02
 updated: 2026-03-02
 revision: 1
+claude_md_coverage: false
 ---
 
 # Template: Rule Document
