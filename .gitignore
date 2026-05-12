@@ -4,3 +4,4 @@
 .agent/
 .agents/
 skills-lock.json
+.DS_Store
