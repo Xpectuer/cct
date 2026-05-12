@@ -109,6 +109,11 @@ pub fn profile_name_exists(name: &str) -> Result<bool> {
     Ok(profiles.iter().any(|p| p.name.eq_ignore_ascii_case(name)))
 }
 
+pub fn find_profile_by_name(name: &str) -> Result<Option<Profile>> {
+    let profiles = load_profiles()?;
+    Ok(profiles.into_iter().find(|p| p.name.eq_ignore_ascii_case(name)))
+}
+
 /// Returns the non-empty string value if present, or None.
 fn non_empty(opt: &Option<String>) -> Option<&str> {
     opt.as_deref().filter(|s| !s.is_empty())
@@ -473,6 +478,40 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
         assert!(profile_name_exists("myprofile").unwrap());
         assert!(profile_name_exists("MYPROFILE").unwrap());
         assert!(!profile_name_exists("other").unwrap());
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn find_profile_by_name_returns_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(
+            &path,
+            "[[profiles]]\nname = \"MyProfile\"\ndescription = \"Test\"\n",
+        )
+        .unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let p = find_profile_by_name("myprofile")
+            .unwrap()
+            .expect("profile should exist");
+        assert_eq!(p.name, "MyProfile");
+        assert_eq!(p.description.as_deref(), Some("Test"));
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn find_profile_by_name_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, "[[profiles]]\nname = \"other\"\n").unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        assert!(find_profile_by_name("missing").unwrap().is_none());
 
         std::env::remove_var("CCT_CONFIG");
     }

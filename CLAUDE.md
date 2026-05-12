@@ -107,11 +107,34 @@ Detailed module docs are in `docs/modules/`:
 - [launch](docs/modules/launch.md) — arg building, exec-replace for Claude and Codex, generate_codex_config, editor open, autoinstall check
 - [cli](docs/modules/cli.md) — cct add interactive CLI flow, 5 prompts, masked summary, duplicate guard
 
-Other docs:
-- [install-script reference](docs/references/install-script.md) — curl|bash installer functions and test coverage
-- [BATS stubbing lesson](docs/lessons/bats-shell-function-stubbing.md) — export -f pattern for shell test isolation
+Rules:
+- [KISS](docs/rules/kiss.md) — prefer the simplest viable solution
+- [Pure builders, thin effectful edges](docs/rules/pure-builders-thin-effectful-edges.md) — separate pure decision logic from side effects
+- [Single source of truth for variant mappings](docs/rules/single-source-of-truth-variant-mappings.md) — one authoritative function per backend-dependent mapping
+- [Mask secrets on every display path](docs/rules/mask-secrets-on-every-display-path.md) — redact TOKEN/KEY/SECRET in all UI and debug output
+- [Preserve user-edited config structure](docs/rules/preserve-user-edited-config-structure.md) — use surgical edits (toml_edit) instead of full rewrites
+- [Hotkey UI changes must be discoverable](docs/rules/hotkey-ui-changes-must-be-discoverable.md) — every new key binding needs a footer hint and a test
+- [Test boundaries with stubs before manual verification](docs/rules/test-boundaries-with-stubs-before-manual-verification.md) — stub external commands before live calls
+- [Assert contracts, not incidental platform strings](docs/rules/assert-contracts-not-incidental-platform-strings.md) — match semantic contracts, not exact tool output wording
+- [Cross-module features need contract tests](docs/rules/cross-module-features-need-contract-tests.md) — cover data flows across module boundaries
+
+Lessons:
+- [BATS stubbing](docs/lessons/bats-shell-function-stubbing.md) — export -f pattern for shell test isolation
 - [Form field index single source of truth](docs/lessons/form-field-index-single-source-of-truth.md) — why polymorphic field buffers need a single mapping function
 - [External tool config schema must be verified](docs/lessons/external-tool-config-schema-must-be-verified.md) — auth.json key casing and required fields must be confirmed from a working example, not guessed
+- [cct env uses exec, not a shell](docs/lessons/cct-env-exec-no-shell-expansion.md) — no variable expansion; wrap in `sh -c` when needed
+- [install.sh 404 network issue](docs/lessons/install-script-404-network-issue.md) — HTTP 404 from GitHub API can mean connectivity failure, not missing releases
+
+References:
+- [install-script reference](docs/references/install-script.md) — curl|bash installer functions and test coverage
+- [Codex backend development guide](docs/references/codex-backend-development-guide.md) — config schema, validation, UI behavior, launch flow, and full_auto toggling
+- [Codex CODEX_HOME storage layout](docs/references/codex-home-storage-layout.md) — per-profile Codex state files and sqlite schema observations
+
+Quality:
+- [Codebase review](docs/quality/codebase-review.md) — gap analysis, risk assessment, and AI usability score
+
+Dashboard:
+- [docs/dashboard.md](docs/dashboard.md) — project status dashboard (drafts, procs, progress)
 
 See also: [ARCHITECTURE.md](ARCHITECTURE.md) for the system-level overview.
 <!-- END:module-docs -->

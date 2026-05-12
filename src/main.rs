@@ -25,6 +25,19 @@ enum Commands {
     Add,
     /// Open profiles.toml in $EDITOR
     Edit,
+    /// Launch a profile by name (interactive picker if no name given)
+    Run {
+        /// Profile name to launch (case-insensitive)
+        name: Option<String>,
+    },
+    /// Run a command with a profile's environment variables
+    Env {
+        /// Profile name whose environment to load
+        profile_name: String,
+        /// Command and arguments (preceded by --)
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -38,8 +51,47 @@ fn main() -> Result<()> {
     match args.command {
         Some(Commands::Add) => cli::run_add(),
         Some(Commands::Edit) => launch::open_editor(&config::config_path()),
+        Some(Commands::Run { name }) => run_profile(name),
+        Some(Commands::Env {
+            profile_name,
+            command,
+        }) => run_env(&profile_name, &command),
         None => run_tui(),
     }
+}
+
+fn run_profile(name: Option<String>) -> Result<()> {
+    let profile = match name {
+        Some(n) => config::find_profile_by_name(&n)?
+            .ok_or_else(|| anyhow::anyhow!("Profile '{}' not found.", n))?,
+        None => {
+            let profiles = config::load_profiles()?;
+            let idx = cli::run_pick_profile(&profiles)?;
+            profiles.into_iter().nth(idx).unwrap()
+        }
+    };
+    let err = match profile.backend {
+        config::Backend::Claude => launch::exec_claude(&profile, false),
+        config::Backend::Codex => launch::exec_codex(&profile),
+    };
+    eprintln!("Error: {err:#}");
+    std::process::exit(1);
+}
+
+fn run_env(profile_name: &str, command: &[String]) -> Result<()> {
+    if command.is_empty() {
+        anyhow::bail!("No command specified. Usage: cct env <profile> -- <command> [args...]");
+    }
+    let profile = config::find_profile_by_name(profile_name)?
+        .ok_or_else(|| anyhow::anyhow!("Profile '{}' not found.", profile_name))?;
+    let cmd = &command[0];
+    let args = &command[1..];
+    if !launch::command_exists(cmd) {
+        anyhow::bail!("Command '{}' not found in PATH.", cmd);
+    }
+    let err = launch::exec_with_env(&profile, cmd, args);
+    eprintln!("Error: {err:#}");
+    std::process::exit(1);
 }
 
 fn enter_add_mode(app: &mut App) {
@@ -302,6 +354,68 @@ mod tests {
         // "cct edit" → command should be Some(Commands::Edit)
         let cli = Cli::try_parse_from(["cct", "edit"]).unwrap();
         assert!(matches!(cli.command, Some(Commands::Edit)));
+    }
+
+    #[test]
+    fn clap_routing_run_with_name() {
+        let cli = Cli::try_parse_from(["cct", "run", "my-profile"]).unwrap();
+        match cli.command {
+            Some(Commands::Run { name }) => assert_eq!(name, Some("my-profile".into())),
+            _ => panic!("expected Run command"),
+        }
+    }
+
+    #[test]
+    fn clap_routing_run_without_name() {
+        let cli = Cli::try_parse_from(["cct", "run"]).unwrap();
+        match cli.command {
+            Some(Commands::Run { name }) => assert!(name.is_none()),
+            _ => panic!("expected Run command"),
+        }
+    }
+
+    #[test]
+    fn clap_routing_env_with_command() {
+        let cli =
+            Cli::try_parse_from(["cct", "env", "my-profile", "--", "python", "-c", "print(1)"])
+                .unwrap();
+        match cli.command {
+            Some(Commands::Env {
+                profile_name,
+                command,
+            }) => {
+                assert_eq!(profile_name, "my-profile");
+                assert_eq!(command, vec!["python", "-c", "print(1)"]);
+            }
+            _ => panic!("expected Env command"),
+        }
+    }
+
+    #[test]
+    fn clap_routing_env_without_double_dash() {
+        let cli =
+            Cli::try_parse_from(["cct", "env", "my-profile", "python", "script.py"]).unwrap();
+        match cli.command {
+            Some(Commands::Env {
+                profile_name,
+                command,
+            }) => {
+                assert_eq!(profile_name, "my-profile");
+                assert_eq!(command, vec!["python", "script.py"]);
+            }
+            _ => panic!("expected Env command"),
+        }
+    }
+
+    #[test]
+    fn clap_routing_env_empty_command() {
+        let cli = Cli::try_parse_from(["cct", "env", "my-profile"]).unwrap();
+        match cli.command {
+            Some(Commands::Env { command, .. }) => {
+                assert!(command.is_empty());
+            }
+            _ => panic!("expected Env command"),
+        }
     }
 
     #[test]

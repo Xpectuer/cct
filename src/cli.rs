@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::io::{self, BufRead, Write};
 
-use crate::config::{self, NewProfile};
+use crate::config::{self, NewProfile, Profile};
 
 fn mask_key(key: &str) -> String {
     if key.len() <= 8 {
@@ -163,6 +163,46 @@ pub fn run_add_with<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> Resul
     Ok(())
 }
 
+pub fn run_pick_profile(profiles: &[Profile]) -> Result<usize> {
+    run_pick_profile_with(profiles, io::stdin().lock(), io::stdout())
+}
+
+pub fn run_pick_profile_with<R: BufRead, W: Write>(
+    profiles: &[Profile],
+    mut reader: R,
+    mut writer: W,
+) -> Result<usize> {
+    if profiles.is_empty() {
+        anyhow::bail!("No profiles configured. Run 'cct add' to create one.");
+    }
+    writeln!(writer, "Select a profile:")?;
+    for (i, p) in profiles.iter().enumerate() {
+        let desc = p.description.as_deref().unwrap_or("");
+        let tag = match p.backend {
+            config::Backend::Claude => "[claude]",
+            config::Backend::Codex => "[codex] ",
+        };
+        writeln!(writer, "  {}) {} {} {}", i + 1, p.name, tag, desc)?;
+    }
+    write!(writer, "Enter number (1-{}): ", profiles.len())?;
+    writer.flush()?;
+
+    let mut line = String::new();
+    reader.read_line(&mut line)?;
+    let num: usize = line
+        .trim()
+        .parse()
+        .map_err(|_| anyhow::anyhow!("Invalid input: '{}'. Expected a number.", line.trim()))?;
+    if num == 0 || num > profiles.len() {
+        anyhow::bail!(
+            "Number out of range: {}. Choose between 1 and {}.",
+            num,
+            profiles.len()
+        );
+    }
+    Ok(num - 1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,5 +260,87 @@ mod tests {
         );
 
         std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    fn pick_profile_selects_valid() {
+        let profiles = vec![
+            Profile {
+                name: "alpha".into(),
+                description: Some("First".into()),
+                env: None,
+                extra_args: None,
+                skip_permissions: None,
+                model: None,
+                backend: config::Backend::Claude,
+                base_url: None,
+                full_auto: None,
+            },
+            Profile {
+                name: "beta".into(),
+                description: None,
+                env: None,
+                extra_args: None,
+                skip_permissions: None,
+                model: None,
+                backend: config::Backend::Codex,
+                base_url: None,
+                full_auto: None,
+            },
+        ];
+        let input = b"2\n";
+        let mut output: Vec<u8> = Vec::new();
+        let idx = run_pick_profile_with(&profiles, &input[..], &mut output).unwrap();
+        assert_eq!(idx, 1);
+        let out = String::from_utf8(output).unwrap();
+        assert!(out.contains("alpha"));
+        assert!(out.contains("[claude]"));
+        assert!(out.contains("[codex]"));
+    }
+
+    #[test]
+    fn pick_profile_rejects_invalid_input() {
+        let profiles = vec![Profile {
+            name: "only".into(),
+            description: None,
+            env: None,
+            extra_args: None,
+            skip_permissions: None,
+            model: None,
+            backend: config::Backend::Claude,
+            base_url: None,
+            full_auto: None,
+        }];
+        let input = b"abc\n";
+        let mut output: Vec<u8> = Vec::new();
+        let err = run_pick_profile_with(&profiles, &input[..], &mut output).unwrap_err();
+        assert!(err.to_string().contains("Invalid input"));
+    }
+
+    #[test]
+    fn pick_profile_rejects_out_of_range() {
+        let profiles = vec![Profile {
+            name: "only".into(),
+            description: None,
+            env: None,
+            extra_args: None,
+            skip_permissions: None,
+            model: None,
+            backend: config::Backend::Claude,
+            base_url: None,
+            full_auto: None,
+        }];
+        let input = b"99\n";
+        let mut output: Vec<u8> = Vec::new();
+        let err = run_pick_profile_with(&profiles, &input[..], &mut output).unwrap_err();
+        assert!(err.to_string().contains("out of range"));
+    }
+
+    #[test]
+    fn pick_profile_empty_list_errors() {
+        let input = b"1\n";
+        let mut output: Vec<u8> = Vec::new();
+        let err = run_pick_profile_with(&[], &input[..], &mut output).unwrap_err();
+        assert!(err.to_string().contains("No profiles"));
     }
 }

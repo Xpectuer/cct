@@ -75,6 +75,18 @@ updated: 2026-03-15
     6. Exec-replaces with `codex <build_codex_args(profile)>`.
   - **Never returns on success**.
 
+- `pub fn command_exists(cmd: &str) -> bool`
+  - Runs `which <cmd>` to test whether an arbitrary command is available in `$PATH`.
+  - Returns `true` if `which` exits with status 0; `false` on non-zero exit or any error.
+  - Used by `run_env` to validate the user-supplied command before exec.
+
+- `pub fn exec_with_env(profile: &Profile, cmd: &str, args: &[String]) -> anyhow::Error`
+  - Injects all key-value pairs from `profile.env` into the current process environment via `env::set_var`.
+  - Exec-replaces the current process with `<cmd> <args...>` using `std::os::unix::process::CommandExt::exec`.
+  - **No shell is involved** — `$VAR` expansion, globs, and pipes do not work. Use `sh -c '...'` when shell features are needed.
+  - **Never returns on success**.
+  - Returns: `anyhow::Error` only when `exec` itself fails.
+
 - `pub fn check_claude_installed() -> bool`
   - Runs `which <bin>` (or the value of `CCT_CLAUDE_BIN` env var when set) to test whether the target binary is available in `$PATH`.
   - The `CCT_CLAUDE_BIN` override is used exclusively in unit tests.
@@ -232,7 +244,7 @@ let args_continue = launch::build_args(&profile, true);
 
 ## Quality Gate Checklist
 
-- [x] **Interface**: 6 public functions documented with signatures, return types, and semantics (added `check_claude_installed`, `prompt_install`)
+- [x] **Interface**: 8 public functions documented with signatures, return types, and semantics
 - [x] **Dependencies**: All internal and external module dependencies listed with reasoning (added `dirs`)
 - [x] **State Management**: Clearly distinguishes pure functions from process-mutating functions; lifecycle of env mutation explained
 - [x] **Edge Cases**: Editor fallback, error-type quirk, argument ordering contract, Unix-only constraint, env set_var threading note
@@ -242,4 +254,4 @@ let args_continue = launch::build_args(&profile, true);
 ---
 
 **Template Version**: 2.0
-**Last Updated**: 2026-03-15 (revision 2 — added check_codex_installed, generate_codex_config, build_codex_args, exec_codex, build_launch_command; updated build_args signature for with_continue)
+**Last Updated**: 2026-05-12 (revision 3 — added exec_with_env and command_exists; documented no-shell-expansion behavior)
