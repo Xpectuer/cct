@@ -1,7 +1,16 @@
 # Pre-commit hooks for cct (Rust project)
-# Install: pre-commit install
+# Install: bash install-hook.sh
 # Run all: pre-commit run --all-files
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+
   - repo: local
     hooks:
       - id: cargo-fmt
@@ -24,16 +33,4 @@ repos:
         language: system
         types: [rust]
         pass_filenames: false
-        stages: [push]
-
-      - id: trailing-whitespace
-        name: trailing whitespace
-        entry: bash -c 'for f in "$@"; do sed -i "" "s/[[:space:]]*$//" "$f" 2>/dev/null || sed -i "s/[[:space:]]*$//" "$f"; done'
-        language: system
-        types: [text]
-
-      - id: end-of-file-fixer
-        name: end of file fixer
-        entry: bash -c 'rc=0; for f in "$@"; do if [ -s "$f" ] && [ -n "$(tail -c1 "$f")" ]; then echo >> "$f"; rc=1; fi; done; exit $rc'
-        language: system
-        types: [text]
+        stages: [pre-push]

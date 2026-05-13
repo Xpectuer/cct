@@ -17,7 +17,8 @@ pre-commit install --hook-type pre-push --overwrite
 
 echo ""
 echo "=== Hooks installed ==="
-echo "  pre-commit: cargo fmt, cargo clippy, trailing-whitespace, end-of-file-fixer"
+echo "  pre-commit: trailing-whitespace, end-of-file-fixer, check-yaml, check-toml,"
+echo "              check-merge-conflict, cargo fmt, cargo clippy"
 echo "  pre-push:   cargo test"
 echo ""
 echo "Run 'pre-commit run --all-files' to verify setup."
