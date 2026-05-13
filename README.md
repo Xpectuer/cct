@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./logo.png" alt="cct logo" width="160">
+</p>
+
 # cct — Claude Code TUI Launcher
 
 A terminal UI for managing and launching [Claude Code](https://claude.ai/code) and [OpenAI Codex](https://github.com/openai/codex) with named profiles. Define multiple configurations in a single TOML file, pick one from a TUI, and `cct` exec-replaces itself with the target CLI — no wrapper process, clean terminal inheritance.
