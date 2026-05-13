@@ -75,6 +75,8 @@ build-aarch64-linux-musl:
   extends: .linux-musl-build
   variables:
     TARGET: aarch64-unknown-linux-musl
+  before_script:
+    - apt-get update && apt-get install -y musl-tools curl docker.io
   script:
     - cargo install cross --git https://github.com/cross-rs/cross
     - cross build --release --target ${TARGET}
