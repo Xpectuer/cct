@@ -76,8 +76,8 @@ build-aarch64-linux-musl:
   variables:
     TARGET: aarch64-unknown-linux-musl
   before_script:
-    - apt-get update && apt-get install -y musl-tools curl python3-pip
-    - pip3 install ziglang
+    - apt-get update && apt-get install -y musl-tools curl xz-utils
+    - curl -fsSL https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz | tar xJ -C /usr/local --strip-components=1
     - rustup target add ${TARGET}
   script:
     - cargo install cargo-zigbuild
