@@ -90,23 +90,23 @@ build-aarch64-linux-musl:
 
 release:
   stage: release
-  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  image: ${RUST_IMAGE}
   needs:
     - build-x86_64-linux-musl
     - build-aarch64-linux-musl
   script:
-    - echo "Creating release ${CI_COMMIT_TAG}"
-  release:
-    tag_name: ${CI_COMMIT_TAG}
-    name: "cct ${CI_COMMIT_TAG}"
-    description: |
-      ## cct ${CI_COMMIT_TAG}
-
-      Static musl-linked binaries — no glibc dependency.
-
-      | Target | Download |
-      |--------|----------|
-      | x86_64-unknown-linux-musl | [cct-x86_64-unknown-linux-musl.tar.gz](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/cct/${CI_COMMIT_TAG}/cct-x86_64-unknown-linux-musl.tar.gz) |
-      | aarch64-unknown-linux-musl | [cct-aarch64-unknown-linux-musl.tar.gz](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/cct/${CI_COMMIT_TAG}/cct-aarch64-unknown-linux-musl.tar.gz) |
+    - |
+      echo "Creating release ${CI_COMMIT_TAG}"
+      curl -sS --fail \
+           --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+           --header "Content-Type: application/json" \
+           --data @- \
+           "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases" <<JSON
+      {
+        "tag_name": "${CI_COMMIT_TAG}",
+        "name": "cct ${CI_COMMIT_TAG}",
+        "description": "## cct ${CI_COMMIT_TAG}\n\nStatic musl-linked binaries — no glibc dependency.\n\n| Target | Download |\n|--------|----------|\n| x86_64-unknown-linux-musl | [cct-x86_64-unknown-linux-musl.tar.gz](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/cct/${CI_COMMIT_TAG}/cct-x86_64-unknown-linux-musl.tar.gz) |\n| aarch64-unknown-linux-musl | [cct-aarch64-unknown-linux-musl.tar.gz](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/cct/${CI_COMMIT_TAG}/cct-aarch64-unknown-linux-musl.tar.gz) |"
+      }
+      JSON
   rules:
     - if: $CI_COMMIT_TAG =~ /^v/
