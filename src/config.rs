@@ -111,7 +111,9 @@ pub fn profile_name_exists(name: &str) -> Result<bool> {
 
 pub fn find_profile_by_name(name: &str) -> Result<Option<Profile>> {
     let profiles = load_profiles()?;
-    Ok(profiles.into_iter().find(|p| p.name.eq_ignore_ascii_case(name)))
+    Ok(profiles
+        .into_iter()
+        .find(|p| p.name.eq_ignore_ascii_case(name)))
 }
 
 /// Returns the non-empty string value if present, or None.

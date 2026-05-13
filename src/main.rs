@@ -393,8 +393,7 @@ mod tests {
 
     #[test]
     fn clap_routing_env_without_double_dash() {
-        let cli =
-            Cli::try_parse_from(["cct", "env", "my-profile", "python", "script.py"]).unwrap();
+        let cli = Cli::try_parse_from(["cct", "env", "my-profile", "python", "script.py"]).unwrap();
         match cli.command {
             Some(Commands::Env {
                 profile_name,
