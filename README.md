@@ -39,10 +39,7 @@ curl -fsSL https://raw.githubusercontent.com/Xpectuer/cc_starter/refs/heads/mast
 
 **Option B — curl|bash (self-hosted GitLab, internal network)**:
 ```bash
-GITLAB_URL=https://gitlab.example.com \
-GITLAB_PROJECT=group/project \
-GITLAB_TOKEN=glpat-xxxx \
-bash install.sh
+curl -fsSL https://gitlab.clounix.com/zhengjy/cc_starter/-/raw/master/install.sh | GITLAB_URL=https://gitlab.clounix.com GITLAB_PROJECT=zhengjy/cc_starter bash
 ```
 
 Installs the latest release binary to `~/.local/bin/cct`. Requires `curl` and `tar`.
