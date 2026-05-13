@@ -81,8 +81,12 @@ impl FormState {
                         env.and_then(|map| map.get("ANTHROPIC_BASE_URL").cloned())
                             .unwrap_or_default()
                     }),
-                    env.and_then(|map| map.get("ANTHROPIC_API_KEY").cloned())
-                        .unwrap_or_default(),
+                    env.and_then(|map| {
+                        map.get("ANTHROPIC_API_KEY")
+                            .or_else(|| map.get("ANTHROPIC_AUTH_TOKEN"))
+                            .cloned()
+                    })
+                    .unwrap_or_default(),
                     profile.model.clone().unwrap_or_else(|| {
                         env.and_then(|map| map.get("ANTHROPIC_MODEL").cloned())
                             .unwrap_or_default()
