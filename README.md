@@ -32,15 +32,23 @@ A terminal UI for managing and launching [Claude Code](https://claude.ai/code) a
 
 ## Install
 
-**Option A — curl|bash (recommended)**:
+**Option A — curl|bash (GitHub, recommended)**:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Xpectuer/cc_starter/refs/heads/master/install.sh | bash
 ```
 
-Installs the latest release binary to `~/.local/bin/cct`. Requires `curl` and `tar`.
-Supported platforms: Linux x86_64, macOS arm64, macOS x86_64.
+**Option B — curl|bash (self-hosted GitLab, internal network)**:
+```bash
+GITLAB_URL=https://gitlab.example.com \
+GITLAB_PROJECT=group/project \
+GITLAB_TOKEN=glpat-xxxx \
+bash install.sh
+```
 
-**Option B — cargo**:
+Installs the latest release binary to `~/.local/bin/cct`. Requires `curl` and `tar`.
+Supported platforms: Linux x86_64 (both), Linux aarch64 (both), macOS arm64 (GitHub only), macOS x86_64 (GitHub only).
+
+**Option C — cargo**:
 ```bash
 cargo install --path .
 ```

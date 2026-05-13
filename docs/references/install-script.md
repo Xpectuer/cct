@@ -109,11 +109,33 @@ Run tests with:
 bats tests/install.bats
 ```
 
+## GitLab (Self-Hosted) Support
+
+When `GITLAB_URL` is set, the script uses the GitLab API and Generic Package Registry instead of GitHub:
+
+```bash
+GITLAB_URL=https://gitlab.example.com \
+GITLAB_PROJECT=group/project \
+GITLAB_TOKEN=glpat-xxxx \
+bash install.sh
+```
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `GITLAB_URL` | (unset) | Set to use GitLab instead of GitHub |
+| `GITLAB_PROJECT` | `${REPO}` | GitLab project path (e.g., `group/project`) |
+| `GITLAB_TOKEN` | (unset) | Optional, for private GitLab instances |
+
+**Note:** GitLab-hosted releases only provide Linux musl binaries (no macOS). On macOS, leave `GITLAB_URL` unset to use GitHub.
+
 ## Configuration Variables
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `REPO` | `zhengjy/cc_starter` | GitHub repo identifier |
+| `REPO` | `Xpectuer/cc_starter` | GitHub repo identifier |
 | `INSTALL_DIR` | `${HOME}/.local/bin` | Destination for the binary |
 | `MAX_RETRIES` | `3` | Number of download attempts |
 | `RETRY_DELAY` | `2` | Seconds between retry attempts |
+| `GITLAB_URL` | (unset) | Self-hosted GitLab base URL |
+| `GITLAB_PROJECT` | (unset) | GitLab project path |
+| `GITLAB_TOKEN` | (unset) | GitLab personal access token |
