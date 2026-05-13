@@ -124,6 +124,7 @@ Lessons:
 - [External tool config schema must be verified](docs/lessons/external-tool-config-schema-must-be-verified.md) — auth.json key casing and required fields must be confirmed from a working example, not guessed
 - [cct env uses exec, not a shell](docs/lessons/cct-env-exec-no-shell-expansion.md) — no variable expansion; wrap in `sh -c` when needed
 - [install.sh 404 network issue](docs/lessons/install-script-404-network-issue.md) — HTTP 404 from GitHub API can mean connectivity failure, not missing releases
+- [GitLab Runner SSH cloning on self-hosted](docs/lessons/gitlab-runner-ssh-cloning-self-hosted.md) — helper image uses apk not apt-get; volume-mounted .ssh has wrong ownership; tagged runners ignore untagged jobs
 
 References:
 - [install-script reference](docs/references/install-script.md) — curl|bash installer functions and test coverage
