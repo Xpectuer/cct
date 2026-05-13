@@ -4,6 +4,10 @@ stages:
   - build
   - release
 
+default:
+  tags:
+    - cc_starter
+
 variables:
   CARGO_TERM_COLOR: always
   RUST_IMAGE: rust:1.94
