@@ -76,7 +76,7 @@ build-aarch64-linux-musl:
   variables:
     TARGET: aarch64-unknown-linux-musl
   before_script:
-    - apt-get update && apt-get install -y musl-tools curl
+    - apt-get update && apt-get install -y musl-tools curl python3-pip
     - pip3 install ziglang
     - rustup target add ${TARGET}
   script:
