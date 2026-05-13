@@ -1,19 +1,30 @@
 # cct — Claude Code TUI Launcher
 
-A terminal UI for managing and launching [Claude Code](https://claude.ai/code) with named profiles. Define multiple configurations in a single TOML file, pick one from a TUI, and `cct` exec-replaces itself with `claude` — no wrapper process, clean terminal inheritance.
+A terminal UI for managing and launching [Claude Code](https://claude.ai/code) and [OpenAI Codex](https://github.com/openai/codex) with named profiles. Define multiple configurations in a single TOML file, pick one from a TUI, and `cct` exec-replaces itself with the target CLI — no wrapper process, clean terminal inheritance.
 
 ## Features
 
+- **Dual backend** — supports Claude Code and OpenAI Codex, with per-backend profile fields, env vars, and launch flags
 - **Profile management** — store model, env vars, and CLI flags per profile
-- **TUI selector** — ratatui-based list+detail panel with keyboard navigation
-- **Inline profile creation** — press `a` in the TUI to add a new profile via a 5-field form, or run `cct add` from the CLI
-- **Auto-populated env vars** — providing `base_url`, `api_key`, or `model` in the add flow generates a `[profiles.env]` section with all relevant Anthropic env vars pre-filled
-- **Sensitive value masking** — env keys containing `TOKEN`, `KEY`, or `SECRET` are redacted in the UI
-- **skip_permissions toggle** — press `s` to toggle `--dangerously-skip-permissions` on the selected profile; the profile row turns red as a visual warning; the change is persisted immediately to `profiles.toml`
-- **Autoinstall** — if `claude` is not found in PATH on startup, `cct` offers to install it via `curl -fsSL https://claude.ai/install.sh | bash`
+- **TUI selector** — ratatui-based list+detail panel with keyboard navigation, organized into Claude/Codex tabs
+- **Inline profile creation** — press `a` in the TUI to open a 6-field add form (backend-aware: Claude gets Pro Model + Fast Model; Codex gets Model + Full Auto), or run `cct add` from the CLI
 - **Inline profile editing** — press `e` on a selected profile to open a prefilled edit form, update the fields inline, and save back to `profiles.toml`
-- **Direct config editing** — run `cct edit` to open `profiles.toml` directly in `$EDITOR` (or `vi`), bypassing the TUI entirely
+- **Auto-populated env vars** — providing `base_url`, `api_key`, or `model` in the add flow generates a `[profiles.env]` section with all relevant env vars pre-filled (Anthropic vars for Claude, `OPENAI_API_KEY` for Codex)
+- **Sensitive value masking** — env keys containing `TOKEN`, `KEY`, or `SECRET` are redacted in the UI
+- **skip_permissions / full_auto toggle** — press `s` to toggle `--dangerously-skip-permissions` on Claude profiles or `--full-auto` on Codex profiles; the change is persisted immediately to `profiles.toml`
+- **One-shot continue** — press `c` to launch the selected Claude profile with `--continue`, resuming the last conversation in a single turn
+- **Autoinstall** — if `claude` is not found in PATH on startup, `cct` offers to install it via `curl -fsSL https://claude.ai/install.sh | bash`
 - **Zero overhead** — `exec()` replaces the process; no parent lingers
+
+## Subcommands
+
+| Command | Action |
+|---------|--------|
+| `cct` (no args) | Launch the TUI |
+| `cct add` | Add a new profile interactively (6 prompts, masked summary, duplicate guard) |
+| `cct edit` | Open `profiles.toml` in `$EDITOR` (or `vi`) |
+| `cct run [name]` | Launch a profile by name (case-insensitive). Without a name, shows an interactive numbered picker |
+| `cct env <profile> -- <cmd> [args...]` | Run any command with a profile's environment variables injected |
 
 ## Install
 
@@ -34,16 +45,17 @@ Requires Rust 1.70+ and a Unix-like OS (uses `exec`).
 
 ## Quick Start
 
-1. Run `cct` once to generate the default config, which lands in `~/Library/Application Support/cc-tui/profiles.toml` on macOS and `~/.config/cc-tui/profiles.toml` on Linux or other Unix-like systems.
+1. Run `cct` once to generate the default config at `~/Library/Application Support/cc-tui/profiles.toml` (macOS) or `~/.config/cc-tui/profiles.toml` (Linux/other Unix-like).
 2. Add profiles interactively:
 
-   **Option A — TUI form**: Run `cct`, then press `a` to open the inline add form. Fill in the 5 fields (Name, Description, Base URL, API Key, Model) and confirm.
+   **Option A — TUI form**: Run `cct`, then press `a` to open the inline add form. Use `Tab` to switch between the Claude/Codex tab to choose which backend the new profile uses. Fill in the fields and confirm.
 
-   **Option B — CLI**: Run `cct add` and answer the prompts.
+   **Option B — CLI**: Run `cct add` and answer the prompts (Claude backend).
 
-   **Option C — Manual edit**: Run `cct edit` to open the config directly in your editor, or manually edit `~/Library/Application Support/cc-tui/profiles.toml` on macOS or `~/.config/cc-tui/profiles.toml` on Linux/other Unix-like systems:
+   **Option C — Manual edit**: Run `cct edit` to open the config in your editor, or edit the file directly:
 
 ```toml
+# Claude profile
 [[profiles]]
 name = "third-party"
 description = "Third-party Claude endpoint"
@@ -56,15 +68,31 @@ extra_args = ["--verbose"]          # optional — appended verbatim
 ANTHROPIC_BASE_URL = "https://api.example.com/v1"
 ANTHROPIC_API_KEY = "sk-..."
 ANTHROPIC_MODEL = "kimi-k2"
-ANTHROPIC_SMALL_FAST_MODEL = "kimi-k2"
 ANTHROPIC_DEFAULT_SONNET_MODEL = "kimi-k2"
 ANTHROPIC_DEFAULT_OPUS_MODEL = "kimi-k2"
-ANTHROPIC_DEFAULT_HAIKU_MODEL = "kimi-k2"
+CLAUDE_CODE_SUBAGENT_MODEL = "kimi-k2"
 API_TIMEOUT_MS = "600000"
 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK = "1"
+CLAUDE_CODE_EFFORT_LEVEL = "max"
+
+# Codex profile
+[[profiles]]
+name = "codex-profile"
+backend = "codex"
+model = "gpt-4.1"
+base_url = "https://api.openai.com/v1"
+full_auto = false
+
+[profiles.env]
+OPENAI_API_KEY = "sk-..."
 ```
 
-3. Run `cct`, select a profile, and press `e` to edit it inline or `Enter` to launch it. To edit the raw config file directly, run `cct edit`.
+3. Run `cct`, select a profile, and press `e` to edit it inline or `Enter` to launch it (or `c` to launch Claude with `--continue`). Switch backend tabs with `Tab` / `1` / `2`.
+4. Launch from the command line:
+   - `cct run <name>` — launch a profile by name directly
+   - `cct run` — interactive numbered picker
+   - `cct env <profile> -- <command>` — run a command with a profile's env vars
 
 ## Keybindings
 
@@ -72,11 +100,15 @@ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
 
 | Key | Action |
 |-----|--------|
-| `j` / `Down` | Next profile |
-| `k` / `Up` | Previous profile |
+| `j` / `Down` | Next profile (within active backend tab) |
+| `k` / `Up` | Previous profile (within active backend tab) |
+| `Tab` | Switch backend tab (Claude ←→ Codex) |
+| `1` | Switch to Claude tab |
+| `2` | Switch to Codex tab |
 | `Enter` | Launch selected profile |
-| `s` | Toggle `skip_permissions` on selected profile (row turns red when enabled) |
-| `a` | Open inline add-profile form |
+| `c` | Launch selected Claude profile with `--continue` (one-shot resume) |
+| `s` | Toggle `skip_permissions` (Claude) or `full_auto` (Codex) on selected profile |
+| `a` | Open inline add-profile form (uses active backend tab) |
 | `e` | Edit the selected profile inline |
 | `q` / `Ctrl-C` | Quit |
 
@@ -109,11 +141,11 @@ Five focused modules, no shared mutable state:
 
 | Module | Responsibility |
 |--------|----------------|
-| `config` | TOML deserialization, default config bootstrap, profile append with env-var generation |
-| `app` | Cursor state, circular navigation, `AppMode` (Normal / AddForm), `FormState` for the 5-field add form |
-| `ui` | ratatui rendering, 35/65 split layout, value masking, inline add-form rendering |
-| `launch` | CLI arg building, exec-replace, editor open |
-| `cli` | `cct add` and `cct edit` subcommands — 5 prompts, masked summary, duplicate guard; open config in `$EDITOR` |
+| `config` | TOML deserialization, default config bootstrap, profile append/update with backend-specific env-var generation, `toggle_skip_permissions` / `toggle_full_auto` via `toml_edit` |
+| `app` | Cursor state, backend-filtered navigation, `AppMode` (Normal / AddForm), `FormState` with backend-aware `to_new_profile()` as single source of truth |
+| `ui` | ratatui rendering, tab bar + 35/65 split layout, value masking, backend-aware form labels |
+| `launch` | CLI arg building for Claude and Codex, exec-replace, codex config/auth generation, editor open, autoinstall check |
+| `cli` | `cct add` interactive flow (6 prompts, masked summary, duplicate guard), `cct run` interactive picker, `cct env` profile env injection |
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for details.
 
