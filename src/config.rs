@@ -187,7 +187,6 @@ pub fn update_profile(original_name: &str, updated: &NewProfile) -> Result<()> {
             let env = ensure_env_table(entry);
             set_optional_string(env, "ANTHROPIC_BASE_URL", non_empty(&updated.base_url));
             set_optional_string(env, "ANTHROPIC_API_KEY", non_empty(&updated.api_key));
-            set_optional_string(env, "ANTHROPIC_AUTH_TOKEN", non_empty(&updated.api_key));
 
             if let Some(model) = non_empty(&updated.model) {
                 for key in [
@@ -284,7 +283,6 @@ pub fn append_profile(profile: &NewProfile) -> Result<()> {
                 }
                 if let Some(key) = api_key {
                     block.push_str(&format!("ANTHROPIC_API_KEY = {:?}\n", key));
-                    block.push_str(&format!("ANTHROPIC_AUTH_TOKEN = {:?}\n", key));
                 }
                 if let Some(m) = model {
                     block.push_str(&format!("ANTHROPIC_MODEL = {:?}\n", m));
