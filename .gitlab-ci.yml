@@ -78,6 +78,7 @@ build-aarch64-linux-musl:
   before_script:
     - apt-get update && apt-get install -y musl-tools curl xz-utils
     - curl -fsSL https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz | tar xJ -C /usr/local --strip-components=1
+    - ln -sf /usr/local/zig /usr/local/bin/zig
     - rustup target add ${TARGET}
   script:
     - cargo install cargo-zigbuild
