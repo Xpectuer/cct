@@ -305,7 +305,7 @@ mod tests {
 
         // Transition to AddForm
         let mut app = App::new(vec![]);
-        app.mode = AppMode::AddForm(Box::new(FormState::new()));
+        app.mode = AppMode::AddForm(Box::default());
         match &app.mode {
             AppMode::AddForm(form) => {
                 assert_eq!(form.active_field, 0);

@@ -87,12 +87,8 @@ fn run_env(profile_name: &str, command: &[String]) -> Result<()> {
     }
     let profile = config::find_profile_by_name(profile_name)?
         .ok_or_else(|| anyhow::anyhow!("Profile '{}' not found.", profile_name))?;
-    let cmd = &command[0];
-    let args = &command[1..];
-    if !launch::command_exists(cmd) {
-        anyhow::bail!("Command '{}' not found in PATH.", cmd);
-    }
-    let err = launch::exec_with_env(&profile, cmd, args);
+    let shell_cmd = shell_words::join(command.iter().map(|s| s.as_str()));
+    let err = launch::exec_with_env(&profile, &shell_cmd);
     eprintln!("Error: {err:#}");
     std::process::exit(1);
 }

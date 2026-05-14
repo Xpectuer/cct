@@ -158,16 +158,16 @@ pub fn command_exists(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Inject profile env vars and exec-replace with an arbitrary command.
+/// Inject profile env vars and exec-replace with the command wrapped in `bash -c`.
 /// Returns only on error (process was not replaced).
-pub fn exec_with_env(profile: &Profile, cmd: &str, args: &[String]) -> anyhow::Error {
+pub fn exec_with_env(profile: &Profile, shell_cmd: &str) -> anyhow::Error {
     if let Some(env_map) = &profile.env {
         for (k, v) in env_map {
             env::set_var(k, v);
         }
     }
-    let err = Command::new(cmd).args(args).exec();
-    anyhow::anyhow!("exec {cmd}: {err}")
+    let err = Command::new("bash").args(["-c", shell_cmd]).exec();
+    anyhow::anyhow!("exec bash -c {shell_cmd:?}: {err}")
 }
 
 /// Set hasCompletedOnboarding: true in ~/.claude.json so Claude Code skips
