@@ -170,6 +170,29 @@ pub fn exec_with_env(profile: &Profile, cmd: &str, args: &[String]) -> anyhow::E
     anyhow::anyhow!("exec {cmd}: {err}")
 }
 
+/// Set hasCompletedOnboarding: true in ~/.claude.json so Claude Code skips
+/// the onboarding flow. Creates the file if it doesn't exist.
+pub fn ensure_claude_onboarding() -> Result<()> {
+    let home =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?;
+    let path = home.join(".claude.json");
+
+    let content = if path.exists() {
+        let text = fs::read_to_string(&path)?;
+        let mut json: serde_json::Value = serde_json::from_str(&text)?;
+        json["hasCompletedOnboarding"] = serde_json::Value::Bool(true);
+        serde_json::to_string_pretty(&json)?
+    } else {
+        r#"{
+  "hasCompletedOnboarding": true
+}"#
+        .to_string()
+    };
+
+    fs::write(&path, content)?;
+    Ok(())
+}
+
 /// Prompt user to install claude via the official installer script.
 /// Must be called BEFORE entering raw mode / alternate screen.
 /// Returns Ok(()) on successful install, Err on failure or user decline.

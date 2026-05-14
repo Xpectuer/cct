@@ -43,6 +43,9 @@ enum Commands {
 fn main() -> Result<()> {
     config::ensure_default_config()?;
 
+    // Ignore errors — failing to set onboarding is non-fatal
+    let _ = launch::ensure_claude_onboarding();
+
     if !launch::check_claude_installed() {
         launch::prompt_install()?;
     }
