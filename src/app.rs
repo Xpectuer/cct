@@ -34,6 +34,7 @@ pub struct FormState {
     pub backend: Backend,
     pub is_edit: bool,
     pub original_name: Option<String>,
+    pub auth_type: Option<String>,
 }
 
 impl Default for FormState {
@@ -63,6 +64,7 @@ impl FormState {
             backend,
             is_edit: false,
             original_name: None,
+            auth_type: None,
         }
     }
 
@@ -98,6 +100,7 @@ impl FormState {
                     })
                     .unwrap_or_default(),
                 ];
+                form.auth_type = profile.auth_type.clone();
             }
             Backend::Codex => {
                 let env = profile.env.as_ref();
@@ -160,6 +163,7 @@ impl FormState {
                     },
                     backend: Backend::Claude,
                     full_auto: None,
+                    auth_type: self.auth_type.clone(),
                 }
             }
             Backend::Codex => {
@@ -185,6 +189,7 @@ impl FormState {
                     fast_model: None,
                     backend: Backend::Codex,
                     full_auto: Some(full_auto),
+                    auth_type: None,
                 }
             }
         }
@@ -333,6 +338,7 @@ mod tests {
             backend,
             base_url: None,
             full_auto: None,
+            auth_type: None,
         }
     }
 
@@ -523,6 +529,7 @@ mod tests {
             backend: Backend::Claude,
             base_url: Some("https://example.com/v1".into()),
             full_auto: None,
+            auth_type: None,
         };
 
         let form = FormState::from_profile(&profile);
@@ -559,6 +566,7 @@ mod tests {
             backend: Backend::Codex,
             base_url: Some("https://api.openai.com/v1".into()),
             full_auto: Some(true),
+            auth_type: None,
         };
 
         let form = FormState::from_profile(&profile);
@@ -644,5 +652,38 @@ mod tests {
             Some("https://clauddy.com/v1"),
             "base_url must be the URL, not something else"
         );
+    }
+
+    #[test]
+    fn from_profile_preserves_auth_type_token() {
+        use std::collections::HashMap;
+        let mut env = HashMap::new();
+        env.insert("ANTHROPIC_AUTH_TOKEN".into(), "sk-token".into());
+        let profile = Profile {
+            name: "token-prof".into(),
+            description: None,
+            env: Some(env),
+            extra_args: None,
+            skip_permissions: None,
+            model: None,
+            backend: Backend::Claude,
+            base_url: None,
+            full_auto: None,
+            auth_type: Some("token".into()),
+        };
+        let form = FormState::from_profile(&profile);
+        assert_eq!(form.auth_type.as_deref(), Some("token"));
+        assert_eq!(form.fields[3], "sk-token");
+    }
+
+    #[test]
+    fn to_new_profile_passes_auth_type() {
+        let mut form = FormState::new();
+        form.auth_type = Some("token".into());
+        form.fields[0] = "test".into();
+        form.fields[3] = "sk-key".into();
+        let np = form.to_new_profile();
+        assert_eq!(np.auth_type.as_deref(), Some("token"));
+        assert_eq!(np.api_key.as_deref(), Some("sk-key"));
     }
 }

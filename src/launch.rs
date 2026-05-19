@@ -270,6 +270,7 @@ mod tests {
             backend: crate::config::Backend::Claude,
             base_url: None,
             full_auto: None,
+            auth_type: None,
         }
     }
 
@@ -363,6 +364,7 @@ mod tests {
             backend: crate::config::Backend::Codex,
             base_url: base_url.map(Into::into),
             full_auto,
+            auth_type: None,
         }
     }
 

@@ -39,7 +39,7 @@ Each module has no circular dependency. `launch` dispatches to either `exec_clau
 
 | Module | File | Responsibility |
 |--------|------|----------------|
-| `config` | `src/config.rs` | Deserialize `profiles.toml` via serde/toml; `Backend` enum; `validate_profiles`; write default config on first run; append new profiles with backend-specific env generation |
+| `config` | `src/config.rs` | Deserialize `profiles.toml` via serde/toml; `Backend` enum; `validate_profiles`; write default config on first run; append/update profiles with backend-specific env generation; `toggle_skip_permissions`, `toggle_auth_type`, `toggle_full_auto` via toml_edit |
 | `app` | `src/app.rs` | Cursor state (`selected`), `active_backend`, `filtered_indices()`, `switch_backend()`, `AppMode` (Normal/AddForm), `FormState` with `to_new_profile()` as single source of truth for field-index mapping |
 | `ui` | `src/ui.rs` | ratatui rendering — tab bar + 35/65 split filtered list + detail/form panel + footer; `build_form_lines` uses `field_labels(backend)` dynamically; masks sensitive env vars |
 | `launch` | `src/launch.rs` | `build_launch_command` dispatch; `exec_claude`/`exec_codex`; `generate_codex_config` writes `~/.config/cct-tui/codex/config.toml`; `exec()` process replacement; open `$EDITOR` |
@@ -149,6 +149,18 @@ User presses [s] (mode = Normal, profiles non-empty)
   → [Err] eprintln warning; app state unchanged
 ```
 
+### Toggle auth_type (key `t`)
+```
+User presses [t] (mode = Normal, profiles non-empty, backend = Claude)
+  → config::toggle_auth_type(&profile.name)
+      → parse TOML with toml_edit::DocumentMut
+      → if auth_type == "token": rename ANTHROPIC_AUTH_TOKEN → ANTHROPIC_API_KEY, remove auth_type field
+      → else: rename ANTHROPIC_API_KEY → ANTHROPIC_AUTH_TOKEN, set auth_type = "token"
+      → write file (preserves comments)
+  → config::load_profiles() to reload updated profile
+  → app.profiles[app.selected] = reloaded profile
+```
+
 ### Hot-reload Config (key `e`)
 ```
 User presses [e]
@@ -172,6 +184,7 @@ User presses [e]
 | `profiles[].full_auto = true` | Codex-only. Adds `--full-auto` to codex invocation. |
 | `profiles[].model` | Claude: adds `--model <value>`. Codex: written to `config.toml` (not passed as CLI arg). |
 | `profiles[].skip_permissions = true` | Claude-only. Adds `--dangerously-skip-permissions` to `claude` invocation. |
+| `profiles[].auth_type = "token"` | Claude-only. Uses `ANTHROPIC_AUTH_TOKEN` env var instead of `ANTHROPIC_API_KEY`. Toggle via `t` key or `cct add --auth-type token`. |
 | `profiles[].extra_args = [...]` | Appended verbatim after other flags |
 | `profiles[].env.*` | Injected as process environment variables before exec |
 | Add-flow `base_url` → `ANTHROPIC_BASE_URL` | Auto-written to `[profiles.env]` by `append_profile` |
@@ -226,7 +239,7 @@ graph TB
 - **`FormState::to_new_profile()` as single source of truth**: All reads from the `fields` array that produce a `NewProfile` go through this one method. This prevents label-to-mapping drift when backends use different field-index conventions.
 - **`generate_codex_config` for codex launch**: Before exec-replacing with `codex`, `cct` writes `~/.config/cct-tui/codex/config.toml` from the selected profile's fields. Multiple codex profiles share one config file; it is fully rewritten each launch. `CODEX_HOME` is set to point codex at this directory.
 - **Auto-env-var generation on add**: Claude profiles generate a complete `[profiles.env]` block. Codex profiles only generate `OPENAI_API_KEY` in env (model and base_url go to `config.toml` instead).
-- **`toml_edit` for surgical writes**: `config::toggle_skip_permissions` uses `toml_edit::DocumentMut` rather than re-serializing the entire config, so user comments and key ordering are preserved on every toggle.
+- **`toml_edit` for surgical writes**: `config::toggle_skip_permissions`, `toggle_auth_type`, and `toggle_full_auto` use `toml_edit::DocumentMut` rather than re-serializing the entire config, so user comments and key ordering are preserved on every toggle.
 - **`skip_permissions` red visual indicator**: Profile list rows are rendered in `Color::Red` when `skip_permissions = true`, providing an immediate danger signal in the TUI.
 - **Dual add surface (CLI + TUI)**: `cct add` (CLI) and `a` key (TUI) both funnel through `config::append_profile`. The CLI always creates Claude profiles; the TUI uses `active_backend`.
 - **Autoinstall on startup**: `main` calls `launch::check_claude_installed()` before entering the TUI. If `claude` is absent, `prompt_install()` offers to run the official installer interactively before raw mode is enabled.

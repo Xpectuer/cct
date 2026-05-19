@@ -79,6 +79,7 @@ fn build_args_ordering() {
         backend: cct::config::Backend::Claude,
         base_url: None,
         full_auto: None,
+        auth_type: None,
     };
     let args = launch::build_args(&profile, false);
     assert_eq!(
@@ -107,6 +108,7 @@ fn build_args_empty_profile() {
         backend: cct::config::Backend::Claude,
         base_url: None,
         full_auto: None,
+        auth_type: None,
     };
     let args = launch::build_args(&profile, false);
     assert!(args.is_empty());

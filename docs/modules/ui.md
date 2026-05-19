@@ -51,6 +51,8 @@ updated: 2026-03-15
 - `fn build_detail(profile: &Profile) -> Vec<Line<'static>>`
   - Constructs the detail panel text from a single `Profile`.
   - For Codex profiles: shows `backend`, `base_url`, `model`, `full_auto` fields instead of Claude-specific fields.
+  - For Claude profiles with `auth_type = "token"`: shows `auth: token`.
+  - Footer: Claude tab shows `[t] Auth` hint for toggling auth type.
   - Returns owned `Vec<Line<'static>>`.
 
 - `fn build_form_lines(form: &FormState) -> Vec<Line<'static>>`

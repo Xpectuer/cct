@@ -22,7 +22,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Add a new profile interactively
-    Add,
+    Add {
+        /// Auth type: "api_key" (default) or "token" (uses ANTHROPIC_AUTH_TOKEN)
+        #[arg(long)]
+        auth_type: Option<String>,
+    },
     /// Open profiles.toml in $EDITOR
     Edit,
     /// Launch a profile by name (interactive picker if no name given)
@@ -52,7 +56,7 @@ fn main() -> Result<()> {
 
     let args = Cli::parse();
     match args.command {
-        Some(Commands::Add) => cli::run_add(),
+        Some(Commands::Add { auth_type }) => cli::run_add(auth_type),
         Some(Commands::Edit) => launch::open_editor(&config::config_path()),
         Some(Commands::Run { name }) => run_profile(name),
         Some(Commands::Env {
@@ -252,6 +256,31 @@ fn run_tui() -> Result<()> {
                             }
                         }
                     }
+                    (KeyCode::Char('t'), _) if !app.profiles.is_empty() => {
+                        let profile = &app.profiles[app.selected];
+                        if profile.backend == config::Backend::Claude {
+                            match config::toggle_auth_type(&profile.name) {
+                                Ok(()) => match config::load_profiles() {
+                                    Ok(updated) => {
+                                        if let Some(up) = updated
+                                            .into_iter()
+                                            .find(|p| p.name.eq_ignore_ascii_case(&profile.name))
+                                        {
+                                            app.profiles[app.selected] = up;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!(
+                                            "Warning: reload after auth toggle failed: {e:#}"
+                                        );
+                                    }
+                                },
+                                Err(e) => {
+                                    eprintln!("Warning: auth toggle failed: {e:#}");
+                                }
+                            }
+                        }
+                    }
                     (KeyCode::Char('a'), _) => {
                         enter_add_mode(&mut app);
                     }
@@ -345,7 +374,16 @@ mod tests {
     fn clap_routing_add_subcommand() {
         // "cct add" → command should be Some(Commands::Add)
         let cli = Cli::try_parse_from(["cct", "add"]).unwrap();
-        assert!(matches!(cli.command, Some(Commands::Add)));
+        assert!(matches!(cli.command, Some(Commands::Add { .. })));
+    }
+
+    #[test]
+    fn clap_routing_add_with_auth_type() {
+        let cli = Cli::try_parse_from(["cct", "add", "--auth-type", "token"]).unwrap();
+        match cli.command {
+            Some(Commands::Add { auth_type }) => assert_eq!(auth_type.as_deref(), Some("token")),
+            _ => panic!("expected Add command with auth_type"),
+        }
     }
 
     #[test]
@@ -431,6 +469,7 @@ mod tests {
             backend: config::Backend::Claude,
             base_url: Some("https://example.com/v1".into()),
             full_auto: None,
+            auth_type: None,
         };
         let mut app = App::new(vec![profile]);
 
@@ -460,6 +499,7 @@ mod tests {
                 backend: config::Backend::Claude,
                 base_url: None,
                 full_auto: None,
+                auth_type: None,
             },
             Profile {
                 name: "beta".into(),
@@ -471,6 +511,7 @@ mod tests {
                 backend: config::Backend::Claude,
                 base_url: None,
                 full_auto: None,
+                auth_type: None,
             },
         ];
 

@@ -19,23 +19,25 @@ updated: 2026-05-11
 
 ### Exported Functions
 
-- `pub fn run_add() -> Result<()>`
-  - Entry point for the `cct add` subcommand; called from `main` when `Commands::Add` is matched.
-  - Delegates to `run_add_with(io::stdin().lock(), io::stdout())`.
+- `pub fn run_add(auth_type: Option<String>) -> Result<()>`
+  - Entry point for the `cct add` subcommand; called from `main` when `Commands::Add { auth_type }` is matched.
+  - Accepts `--auth-type token` flag to use `ANTHROPIC_AUTH_TOKEN` instead of `ANTHROPIC_API_KEY`.
+  - Delegates to `run_add_with(io::stdin().lock(), io::stdout(), auth_type)`.
   - Returns: `anyhow::Result<()>`.
 
-- `pub fn run_add_with<R: BufRead, W: Write>(reader: R, writer: W) -> Result<()>`
+- `pub fn run_add_with<R: BufRead, W: Write>(reader: R, writer: W, auth_type: Option<String>) -> Result<()>`
   - Testable, I/O-generic version of the add flow.
   - Accepts any `BufRead` reader and `Write` writer, enabling unit tests to inject fake stdin/stdout without touching real file descriptors.
-  - **5-prompt sequence** (in order):
+  - **6-prompt sequence** (in order):
     1. **Name** (required, loops until non-empty; exits with code 1 if duplicate detected)
     2. **Description** (optional — empty input → `None`)
     3. **Base URL** (optional)
     4. **API Key** (optional)
     5. **Model** (optional)
+    6. **Fast Model** (optional, for Haiku/SmallFast tier)
   - After prompts: prints a summary table with the API key masked via `mask_key`.
   - Prompts `"Save? (y/n): "` — any response other than `"y"` (case-insensitive) prints `"Cancelled."` and returns `Ok(())`.
-  - On confirmation: calls `config::append_profile(&NewProfile { name, description, base_url, api_key, model })` then prints `"Profile '<name>' added."`.
+  - On confirmation: calls `config::append_profile(&NewProfile { ..., auth_type })` then prints `"Profile '<name>' added."`.
   - Returns `Ok(())` on success or user cancellation; `Err` only on I/O failures.
 
 ### Private Functions
@@ -103,15 +105,15 @@ The only persistent side effect is the file write performed by `config::append_p
 ```rust
 // In main.rs — routing for CLI subcommands:
 match args.command {
-    Some(Commands::Add) => cli::run_add(),                                       // delegates to run_add_with(stdin, stdout)
-    Some(Commands::Edit) => launch::open_editor(&config::config_path()),         // opens profiles.toml in $EDITOR
+    Some(Commands::Add { auth_type }) => cli::run_add(auth_type),
+    Some(Commands::Edit) => launch::open_editor(&config::config_path()),
     None => run_tui(),
 }
 
 // In tests — inject deterministic input/output:
-let input = b"my-profile\nA description\nhttps://api.example.com\nsk-test-key\nkimi-k2\ny\n";
+let input = b"my-profile\nA description\nhttps://api.example.com\nsk-test-key\nkimi-k2\n\ny\n";
 let mut output: Vec<u8> = Vec::new();
-cli::run_add_with(&input[..], &mut output).unwrap();
+cli::run_add_with(&input[..], &mut output, None).unwrap();
 
 // Verify the profile was created:
 let profiles = config::load_profiles().unwrap();

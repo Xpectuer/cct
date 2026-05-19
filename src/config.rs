@@ -23,6 +23,8 @@ pub struct Profile {
     pub backend: Backend,
     pub base_url: Option<String>,
     pub full_auto: Option<bool>,
+    #[serde(default)]
+    pub auth_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -102,6 +104,7 @@ pub struct NewProfile {
     pub fast_model: Option<String>,
     pub backend: Backend,
     pub full_auto: Option<bool>,
+    pub auth_type: Option<String>,
 }
 
 pub fn profile_name_exists(name: &str) -> Result<bool> {
@@ -184,48 +187,66 @@ pub fn update_profile(original_name: &str, updated: &NewProfile) -> Result<()> {
             entry.remove("backend");
             entry.remove("full_auto");
 
-            let env = ensure_env_table(entry);
-            set_optional_string(env, "ANTHROPIC_BASE_URL", non_empty(&updated.base_url));
-            set_optional_string(env, "ANTHROPIC_API_KEY", non_empty(&updated.api_key));
-
-            if let Some(model) = non_empty(&updated.model) {
-                for key in [
-                    "ANTHROPIC_MODEL",
-                    "ANTHROPIC_DEFAULT_SONNET_MODEL",
-                    "ANTHROPIC_DEFAULT_OPUS_MODEL",
-                    "CLAUDE_CODE_SUBAGENT_MODEL",
-                ] {
-                    env[key] = value(model);
-                }
-                env["API_TIMEOUT_MS"] = value("600000");
-                env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = value("1");
-                env["CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK"] = value("1");
-                env["CLAUDE_CODE_EFFORT_LEVEL"] = value("max");
+            let auth_key = if updated.auth_type.as_deref() == Some("token") {
+                "ANTHROPIC_AUTH_TOKEN"
             } else {
-                for key in [
-                    "ANTHROPIC_MODEL",
-                    "ANTHROPIC_DEFAULT_SONNET_MODEL",
-                    "ANTHROPIC_DEFAULT_OPUS_MODEL",
-                    "CLAUDE_CODE_SUBAGENT_MODEL",
-                    "API_TIMEOUT_MS",
-                    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
-                    "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK",
-                    "CLAUDE_CODE_EFFORT_LEVEL",
-                ] {
-                    env.remove(key);
+                "ANTHROPIC_API_KEY"
+            };
+            let other_key = if updated.auth_type.as_deref() == Some("token") {
+                "ANTHROPIC_API_KEY"
+            } else {
+                "ANTHROPIC_AUTH_TOKEN"
+            };
+            {
+                let env = ensure_env_table(entry);
+                set_optional_string(env, "ANTHROPIC_BASE_URL", non_empty(&updated.base_url));
+                env.remove(other_key);
+                set_optional_string(env, auth_key, non_empty(&updated.api_key));
+
+                if let Some(model) = non_empty(&updated.model) {
+                    for key in [
+                        "ANTHROPIC_MODEL",
+                        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                        "CLAUDE_CODE_SUBAGENT_MODEL",
+                    ] {
+                        env[key] = value(model);
+                    }
+                    env["API_TIMEOUT_MS"] = value("600000");
+                    env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = value("1");
+                    env["CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK"] = value("1");
+                    env["CLAUDE_CODE_EFFORT_LEVEL"] = value("max");
+                } else {
+                    for key in [
+                        "ANTHROPIC_MODEL",
+                        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                        "CLAUDE_CODE_SUBAGENT_MODEL",
+                        "API_TIMEOUT_MS",
+                        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+                        "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK",
+                        "CLAUDE_CODE_EFFORT_LEVEL",
+                    ] {
+                        env.remove(key);
+                    }
+                }
+
+                if let Some(fm) = non_empty(&updated.fast_model) {
+                    env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = value(fm);
+                    env["ANTHROPIC_SMALL_FAST_MODEL"] = value(fm);
+                } else {
+                    for key in [
+                        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+                        "ANTHROPIC_SMALL_FAST_MODEL",
+                    ] {
+                        env.remove(key);
+                    }
                 }
             }
-
-            if let Some(fm) = non_empty(&updated.fast_model) {
-                env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = value(fm);
-                env["ANTHROPIC_SMALL_FAST_MODEL"] = value(fm);
+            if updated.auth_type.as_deref() == Some("token") {
+                entry["auth_type"] = value("token");
             } else {
-                for key in [
-                    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-                    "ANTHROPIC_SMALL_FAST_MODEL",
-                ] {
-                    env.remove(key);
-                }
+                entry.remove("auth_type");
             }
         }
         Backend::Codex => {
@@ -268,6 +289,9 @@ pub fn append_profile(profile: &NewProfile) -> Result<()> {
     if let Some(full_auto) = profile.full_auto {
         block.push_str(&format!("full_auto = {full_auto}\n"));
     }
+    if profile.auth_type.as_deref() == Some("token") {
+        block.push_str("auth_type = \"token\"\n");
+    }
 
     match profile.backend {
         Backend::Claude => {
@@ -282,7 +306,12 @@ pub fn append_profile(profile: &NewProfile) -> Result<()> {
                     block.push_str(&format!("ANTHROPIC_BASE_URL = {:?}\n", url));
                 }
                 if let Some(key) = api_key {
-                    block.push_str(&format!("ANTHROPIC_API_KEY = {:?}\n", key));
+                    let auth_key = if profile.auth_type.as_deref() == Some("token") {
+                        "ANTHROPIC_AUTH_TOKEN"
+                    } else {
+                        "ANTHROPIC_API_KEY"
+                    };
+                    block.push_str(&format!("{auth_key} = {:?}\n", key));
                 }
                 if let Some(m) = model {
                     block.push_str(&format!("ANTHROPIC_MODEL = {:?}\n", m));
@@ -337,6 +366,56 @@ pub fn toggle_skip_permissions(profile_name: &str, new_value: bool) -> Result<()
         .with_context(|| format!("profile {profile_name:?} not found in config"))?;
 
     entry["skip_permissions"] = value(new_value);
+    fs::write(&path, doc.to_string()).with_context(|| format!("write config {path:?}"))?;
+    Ok(())
+}
+
+/// Toggle auth_type between "api_key" (ANTHROPIC_API_KEY) and "token"
+/// (ANTHROPIC_AUTH_TOKEN) for a named Claude profile. Renames the env var key
+/// and updates the auth_type field. Uses toml_edit for surgical edits.
+pub fn toggle_auth_type(profile_name: &str) -> Result<()> {
+    let path = config_path();
+    let content = fs::read_to_string(&path).with_context(|| format!("read config {path:?}"))?;
+    let mut doc = content
+        .parse::<toml_edit::DocumentMut>()
+        .with_context(|| format!("parse TOML in {path:?}"))?;
+
+    let profiles = doc
+        .get_mut("profiles")
+        .and_then(|v| v.as_array_of_tables_mut())
+        .with_context(|| "no [[profiles]] array in config")?;
+
+    let entry = profiles
+        .iter_mut()
+        .find(|t| t.get("name").and_then(|v| v.as_str()) == Some(profile_name))
+        .with_context(|| format!("profile {profile_name:?} not found in config"))?;
+
+    let is_token = entry.get("auth_type").and_then(|v| v.as_str()) == Some("token");
+
+    {
+        let env = ensure_env_table(entry);
+        if is_token {
+            if let Some(val) = env.get("ANTHROPIC_AUTH_TOKEN").and_then(|v| v.as_str()) {
+                let owned = val.to_string();
+                env["ANTHROPIC_API_KEY"] = value(&owned[..]);
+            }
+            env.remove("ANTHROPIC_AUTH_TOKEN");
+        } else {
+            if let Some(val) = env.get("ANTHROPIC_API_KEY").and_then(|v| v.as_str()) {
+                let owned = val.to_string();
+                env["ANTHROPIC_AUTH_TOKEN"] = value(&owned[..]);
+            }
+            env.remove("ANTHROPIC_API_KEY");
+        }
+    }
+
+    if is_token {
+        entry.remove("auth_type");
+    } else {
+        entry["auth_type"] = value("token");
+    }
+
+    prune_empty_env_table(entry);
     fs::write(&path, doc.to_string()).with_context(|| format!("write config {path:?}"))?;
     Ok(())
 }
@@ -432,6 +511,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             fast_model: None,
             backend: Backend::Claude,
             full_auto: None,
+            auth_type: None,
         };
         append_profile(&new).unwrap();
         let profiles = load_profiles().unwrap();
@@ -459,6 +539,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             fast_model: None,
             backend: Backend::Claude,
             full_auto: None,
+            auth_type: None,
         };
         append_profile(&new).unwrap();
         let content = std::fs::read_to_string(&path).unwrap();
@@ -535,6 +616,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             fast_model: None,
             backend: Backend::Claude,
             full_auto: None,
+            auth_type: None,
         };
         append_profile(&new).unwrap();
 
@@ -635,6 +717,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             fast_model: None,
             backend: Backend::Claude,
             full_auto: None,
+            auth_type: None,
         };
         append_profile(&new).unwrap();
 
@@ -695,6 +778,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             fast_model: None,
             backend: Backend::Claude,
             full_auto: None,
+            auth_type: None,
         };
         append_profile(&new).unwrap();
 
@@ -806,6 +890,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             fast_model: None,
             backend: Backend::Claude,
             full_auto: None,
+            auth_type: None,
         };
         append_profile(&new).unwrap();
         let profiles = load_profiles().unwrap();
@@ -860,6 +945,7 @@ base_url = "https://api.example.com/v1"
             backend: Backend::Codex,
             base_url: None,
             full_auto: None,
+            auth_type: None,
         }];
         let result = validate_profiles(&profiles);
         assert!(result.is_err());
@@ -882,6 +968,7 @@ base_url = "https://api.example.com/v1"
             backend: Backend::Claude,
             base_url: None,
             full_auto: Some(true),
+            auth_type: None,
         }];
         let result = validate_profiles(&profiles);
         assert!(result.is_err());
@@ -974,6 +1061,7 @@ base_url = "https://api.example.com/v1"
             fast_model: None,
             backend: Backend::Codex,
             full_auto: Some(true),
+            auth_type: None,
         };
         append_profile(&new).unwrap();
 
@@ -1044,6 +1132,7 @@ OPENAI_API_KEY = "sk-old"
             fast_model: None,
             backend: Backend::Codex,
             full_auto: Some(true),
+            auth_type: None,
         };
 
         update_profile("codex-profile", &updated).unwrap();
@@ -1108,6 +1197,7 @@ CUSTOM_HEADER = "keep-me"
             fast_model: None,
             backend: Backend::Claude,
             full_auto: None,
+            auth_type: None,
         };
 
         update_profile("claude-profile", &updated).unwrap();
@@ -1184,6 +1274,7 @@ description = "Second profile"
             fast_model: None,
             backend: Backend::Claude,
             full_auto: None,
+            auth_type: None,
         };
 
         update_profile("first", &updated).unwrap();
@@ -1217,10 +1308,171 @@ description = "Second profile"
             fast_model: None,
             backend: Backend::Claude,
             full_auto: None,
+            auth_type: None,
         };
 
         let result = update_profile("missing", &updated);
         assert!(result.is_err());
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    // --- toggle_auth_type tests ---
+
+    #[test]
+    #[serial]
+    fn toggle_auth_type_api_key_to_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(
+            &path,
+            "[[profiles]]\nname = \"test\"\n\n[profiles.env]\nANTHROPIC_API_KEY = \"sk-key\"\nANTHROPIC_BASE_URL = \"https://api.example.com\"\n",
+        )
+        .unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        toggle_auth_type("test").unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            content.contains("ANTHROPIC_AUTH_TOKEN"),
+            "should have AUTH_TOKEN after toggle, got:\n{content}"
+        );
+        assert!(
+            !content.contains("ANTHROPIC_API_KEY"),
+            "should not have API_KEY after toggle, got:\n{content}"
+        );
+        assert!(
+            content.contains("auth_type = \"token\""),
+            "should have auth_type field, got:\n{content}"
+        );
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn toggle_auth_type_token_to_api_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(
+            &path,
+            "[[profiles]]\nname = \"test\"\nauth_type = \"token\"\n\n[profiles.env]\nANTHROPIC_AUTH_TOKEN = \"sk-token\"\nANTHROPIC_BASE_URL = \"https://api.example.com\"\n",
+        )
+        .unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        toggle_auth_type("test").unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            content.contains("ANTHROPIC_API_KEY"),
+            "should have API_KEY after toggle back, got:\n{content}"
+        );
+        assert!(
+            !content.contains("ANTHROPIC_AUTH_TOKEN"),
+            "should not have AUTH_TOKEN after toggle back, got:\n{content}"
+        );
+        assert!(
+            !content.contains("auth_type"),
+            "should not have auth_type field after toggle back, got:\n{content}"
+        );
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn toggle_auth_type_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, "[[profiles]]\nname = \"other\"\n").unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let result = toggle_auth_type("missing");
+        assert!(result.is_err());
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn append_profile_with_auth_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, DEFAULT_CONFIG).unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let new = NewProfile {
+            name: "token-profile".into(),
+            description: Some("Token auth".into()),
+            base_url: Some("https://api.example.com".into()),
+            api_key: Some("sk-token-key".into()),
+            model: Some("kimi-k2".into()),
+            fast_model: None,
+            backend: Backend::Claude,
+            full_auto: None,
+            auth_type: Some("token".into()),
+        };
+        append_profile(&new).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let block_start = content.find("name = \"token-profile\"").unwrap();
+        let block = &content[block_start..];
+        assert!(
+            block.contains("ANTHROPIC_AUTH_TOKEN"),
+            "should contain AUTH_TOKEN, got:\n{block}"
+        );
+        assert!(
+            !block.contains("ANTHROPIC_API_KEY"),
+            "should NOT contain API_KEY, got:\n{block}"
+        );
+        assert!(
+            block.contains("auth_type = \"token\""),
+            "should contain auth_type, got:\n{block}"
+        );
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn update_profile_with_auth_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(
+            &path,
+            "[[profiles]]\nname = \"upd\"\n\n[profiles.env]\nANTHROPIC_API_KEY = \"sk-old\"\n",
+        )
+        .unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let updated = NewProfile {
+            name: "upd".into(),
+            description: None,
+            base_url: None,
+            api_key: Some("sk-new-token".into()),
+            model: None,
+            fast_model: None,
+            backend: Backend::Claude,
+            full_auto: None,
+            auth_type: Some("token".into()),
+        };
+        update_profile("upd", &updated).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            content.contains("ANTHROPIC_AUTH_TOKEN"),
+            "should have AUTH_TOKEN, got:\n{content}"
+        );
+        assert!(
+            !content.contains("ANTHROPIC_API_KEY"),
+            "should NOT have API_KEY, got:\n{content}"
+        );
+        assert!(
+            content.contains("auth_type = \"token\""),
+            "should have auth_type, got:\n{content}"
+        );
 
         std::env::remove_var("CCT_CONFIG");
     }

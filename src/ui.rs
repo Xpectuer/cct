@@ -73,7 +73,7 @@ fn confirmation_prompt(form: &FormState) -> &'static str {
 fn normal_footer_text(backend: &Backend) -> &'static str {
     match backend {
         Backend::Claude => {
-            " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [c] Resume  [s] Skip-perms  [a] Add  [e] Edit  [q] Quit"
+            " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [c] Resume  [s] Skip-perms  [t] Auth  [a] Add  [e] Edit  [q] Quit"
         }
         Backend::Codex => {
             " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [s] Full-auto  [a] Add  [e] Edit  [q] Quit"
@@ -211,6 +211,9 @@ fn build_detail(profile: &Profile) -> Vec<Line<'static>> {
         Backend::Claude => {
             if profile.skip_permissions.unwrap_or(false) {
                 lines.push(Line::from("skip_permissions: \u{2713}"));
+            }
+            if profile.auth_type.as_deref() == Some("token") {
+                lines.push(Line::from("auth: token"));
             }
         }
         Backend::Codex => {
@@ -410,6 +413,7 @@ mod tests {
         let claude_footer = normal_footer_text(&Backend::Claude);
         assert!(claude_footer.contains("[a] Add"));
         assert!(claude_footer.contains("[s] Skip-perms"));
+        assert!(claude_footer.contains("[t] Auth"));
         assert!(claude_footer.contains("[c] Resume"));
         assert!(claude_footer.contains("[e] Edit"));
         assert!(claude_footer.contains("[Tab/1/2] Backend"));
@@ -422,6 +426,10 @@ mod tests {
         assert!(
             !codex_footer.contains("[c] Resume"),
             "Codex footer should not show Resume"
+        );
+        assert!(
+            !codex_footer.contains("[t] Auth"),
+            "Codex footer should not show Auth"
         );
         assert_eq!(codex_footer.matches("[e] Edit").count(), 1);
     }
@@ -496,6 +504,7 @@ mod tests {
             backend: Backend::Codex,
             base_url: Some("https://api.openai.com".into()),
             full_auto: Some(true),
+            auth_type: None,
         };
 
         let lines = build_detail(&codex_profile);
@@ -526,6 +535,7 @@ mod tests {
             backend: Backend::Claude,
             base_url: None,
             full_auto: None,
+            auth_type: None,
         };
 
         let lines = build_detail(&claude_profile);
@@ -556,6 +566,7 @@ mod tests {
             backend: crate::config::Backend::Claude,
             base_url: None,
             full_auto: None,
+            auth_type: None,
         };
         // Verify skip_permissions triggers the red-style branch
         assert!(profile.skip_permissions.unwrap_or(false));
@@ -576,6 +587,7 @@ mod tests {
             backend: crate::config::Backend::Claude,
             base_url: None,
             full_auto: None,
+            auth_type: None,
         };
         assert!(!safe_profile.skip_permissions.unwrap_or(false));
     }
@@ -680,6 +692,58 @@ mod tests {
         assert!(
             !key_line.contains("sk-openai-key"),
             "API Key must NOT appear in cleartext"
+        );
+    }
+
+    #[test]
+    fn detail_shows_auth_type_token() {
+        let profile = Profile {
+            name: "token-profile".into(),
+            description: None,
+            env: None,
+            model: None,
+            skip_permissions: None,
+            extra_args: None,
+            backend: crate::config::Backend::Claude,
+            base_url: None,
+            full_auto: None,
+            auth_type: Some("token".into()),
+        };
+        let lines = build_detail(&profile);
+        let joined: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("auth: token"),
+            "should show auth: token, got:\n{joined}"
+        );
+    }
+
+    #[test]
+    fn detail_does_not_show_auth_for_api_key() {
+        let profile = Profile {
+            name: "normal-profile".into(),
+            description: None,
+            env: None,
+            model: None,
+            skip_permissions: None,
+            extra_args: None,
+            backend: crate::config::Backend::Claude,
+            base_url: None,
+            full_auto: None,
+            auth_type: None,
+        };
+        let lines = build_detail(&profile);
+        let joined: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !joined.contains("auth:"),
+            "should NOT show auth when None, got:\n{joined}"
         );
     }
 }

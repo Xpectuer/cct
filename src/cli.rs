@@ -11,11 +11,15 @@ fn mask_key(key: &str) -> String {
     }
 }
 
-pub fn run_add() -> Result<()> {
-    run_add_with(io::stdin().lock(), io::stdout())
+pub fn run_add(auth_type: Option<String>) -> Result<()> {
+    run_add_with(io::stdin().lock(), io::stdout(), auth_type)
 }
 
-pub fn run_add_with<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> Result<()> {
+pub fn run_add_with<R: BufRead, W: Write>(
+    mut reader: R,
+    mut writer: W,
+    auth_type: Option<String>,
+) -> Result<()> {
     // Name (required)
     let name = loop {
         write!(writer, "Name: ")?;
@@ -157,6 +161,7 @@ pub fn run_add_with<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> Resul
         fast_model,
         backend: config::Backend::Claude,
         full_auto: None,
+        auth_type,
     };
     config::append_profile(&profile)?;
     writeln!(writer, "Profile '{}' added.", name)?;
@@ -223,7 +228,7 @@ mod tests {
         // Test that a valid add flow works (6 fields: name, desc, base_url, api_key, model, fast_model)
         let input = b"newprofile\nmy desc\nhttps://api.example.com\nsk-test\nMiniMax-M2.1\n\ny\n";
         let mut output: Vec<u8> = Vec::new();
-        run_add_with(&input[..], &mut output).unwrap();
+        run_add_with(&input[..], &mut output, None).unwrap();
 
         let profiles = config::load_profiles().unwrap();
         assert_eq!(profiles.len(), 2);
@@ -249,7 +254,7 @@ mod tests {
         // Input: name, desc, base_url, api_key, model, fast_model, confirm
         let input = b"cli-test\nsome desc\n\n\n\n\ny\n";
         let mut output: Vec<u8> = Vec::new();
-        run_add_with(&input[..], &mut output).unwrap();
+        run_add_with(&input[..], &mut output, None).unwrap();
 
         let profiles = config::load_profiles().unwrap();
         let p = profiles.iter().find(|p| p.name == "cli-test").unwrap();
@@ -275,6 +280,7 @@ mod tests {
                 backend: config::Backend::Claude,
                 base_url: None,
                 full_auto: None,
+                auth_type: None,
             },
             Profile {
                 name: "beta".into(),
@@ -286,6 +292,7 @@ mod tests {
                 backend: config::Backend::Codex,
                 base_url: None,
                 full_auto: None,
+                auth_type: None,
             },
         ];
         let input = b"2\n";
@@ -310,6 +317,7 @@ mod tests {
             backend: config::Backend::Claude,
             base_url: None,
             full_auto: None,
+            auth_type: None,
         }];
         let input = b"abc\n";
         let mut output: Vec<u8> = Vec::new();
@@ -329,6 +337,7 @@ mod tests {
             backend: config::Backend::Claude,
             base_url: None,
             full_auto: None,
+            auth_type: None,
         }];
         let input = b"99\n";
         let mut output: Vec<u8> = Vec::new();

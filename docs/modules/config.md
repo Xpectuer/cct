@@ -34,6 +34,7 @@ updated: 2026-03-15
   - `env: Option<HashMap<String, String>>` — Environment variables injected before exec.
   - `extra_args: Option<Vec<String>>` — Additional CLI arguments appended verbatim.
   - `skip_permissions: Option<bool>` — Claude-only. When `true`, adds `--dangerously-skip-permissions`.
+  - `auth_type: Option<String>` — Claude only. When `"token"`, uses `ANTHROPIC_AUTH_TOKEN` env var. Default `None` means `ANTHROPIC_API_KEY`.
   - `model: Option<String>` — Passed via `--model` for Claude; via `config.toml` for Codex.
   - Derives: `Debug`, `Deserialize`, `Clone`.
 
@@ -41,7 +42,8 @@ updated: 2026-03-15
   - `name: String` — Required profile name (must be unique, case-insensitive).
   - `description: Option<String>` — Human-readable description (Claude only; ignored for Codex).
   - `base_url: Option<String>` — For Claude: `ANTHROPIC_BASE_URL` in env. For Codex: written as `base_url =` in the profile block.
-  - `api_key: Option<String>` — For Claude: `ANTHROPIC_API_KEY` in env. For Codex: `OPENAI_API_KEY` in env.
+  - `api_key: Option<String>` — For Claude: `ANTHROPIC_API_KEY` in env (or `ANTHROPIC_AUTH_TOKEN` if `auth_type = "token"`). For Codex: `OPENAI_API_KEY` in env.
+  - `auth_type: Option<String>` — Claude only. When `"token"`, writes `ANTHROPIC_AUTH_TOKEN` instead of `ANTHROPIC_API_KEY`.
   - `model: Option<String>` — For Claude: `model =` field + 5 model alias env vars. For Codex: `model =` field only (no env vars).
   - `backend: Backend` — Which backend this profile targets.
   - `full_auto: Option<bool>` — Codex-only. Written as `full_auto =` in the profile block.
@@ -87,6 +89,12 @@ updated: 2026-03-15
   - Surgically updates the `skip_permissions` field of the named profile using `toml_edit::DocumentMut`.
   - Preserves all comments, whitespace, and key ordering for other profiles.
   - Callers in `main.rs` reflect the change optimistically in `app.profiles[app.selected]` after a successful return.
+
+- `toggle_auth_type(profile_name: &str) -> Result<()>`
+  - Toggles between `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` for Claude profiles.
+  - Renames the env var key and sets/removes the `auth_type = "token"` field using `toml_edit::DocumentMut`.
+  - Does nothing to the key value — only renames the env var name.
+  - Bound to `t` key in the TUI. Equivalent CLI: `cct add --auth-type token` for new profiles.
 
 ### Private Constants
 

@@ -19,14 +19,14 @@ updated: 2026-03-15
 
 ### Exported Constants
 
-- `pub const FIELD_LABELS: [&str; 5]` — Claude-specific ordered labels for the 5 add-form fields: `["Name *", "Description", "Base URL", "API Key", "Model"]`. Retained for backward compatibility; prefer `field_labels(backend)` for backend-aware rendering.
+- `pub const FIELD_LABELS: [&str; 6]` — Claude-specific ordered labels for the 6 add-form fields. Retained for backward compatibility; prefer `field_labels(backend)` for backend-aware rendering.
 
 ### Exported Free Functions
 
-- `pub fn field_labels(backend: &Backend) -> [&'static str; 5]`
-  - Returns backend-specific field label arrays for the 5-slot add form:
-    - `Backend::Claude` → `["Name *", "Description", "Base URL", "API Key", "Model"]`
-    - `Backend::Codex` → `["Name *", "Base URL", "API Key", "Model", "Full Auto (y/n)"]`
+- `pub fn field_labels(backend: &Backend) -> [&'static str; 6]`
+  - Returns backend-specific field label arrays for the 6-slot add form:
+    - `Backend::Claude` → `["Name *", "Description", "Base URL", "API Key", "Pro Model", "Fast Model"]`
+    - `Backend::Codex` → `["Name *", "Base URL", "API Key", "Model", "Full Auto (y/n)", ""]`
   - Used by `ui::build_form_lines` and internally by `FormState::to_new_profile` to keep label order and field mapping in sync.
 
 ### Exported Enums
@@ -38,13 +38,16 @@ updated: 2026-03-15
 ### Exported Structs
 
 - `pub struct FormState` — holds the transient state of the inline add form:
-  - `pub fields: [String; 5]` — one string buffer per field. The semantic meaning of each index depends on `backend`:
-    - Claude: `[0]=Name, [1]=Description, [2]=Base URL, [3]=API Key, [4]=Model`
-    - Codex: `[0]=Name, [1]=Base URL, [2]=API Key, [3]=Model, [4]=Full Auto (y/n)`
-  - `pub active_field: usize` — index of the currently focused field (0–4); clamped by `next_field`/`prev_field`.
+  - `pub fields: [String; 6]` — one string buffer per field. The semantic meaning of each index depends on `backend`:
+    - Claude: `[0]=Name, [1]=Description, [2]=Base URL, [3]=API Key, [4]=Pro Model, [5]=Fast Model`
+    - Codex: `[0]=Name, [1]=Base URL, [2]=API Key, [3]=Model, [4]=Full Auto (y/n), [5]=""`
+  - `pub active_field: usize` — index of the currently focused field (0–5); clamped by `next_field`/`prev_field`.
   - `pub confirming: bool` — when `true`, the form shows the confirmation summary view.
   - `pub error: Option<String>` — inline validation error displayed below the form.
   - `pub backend: Backend` — determines which field layout is in use.
+  - `pub auth_type: Option<String>` — persisted auth type; `"token"` means `ANTHROPIC_AUTH_TOKEN`. Set from `Profile.auth_type` in `from_profile`, passed to `NewProfile` in `to_new_profile`.
+  - `pub is_edit: bool` — `true` when editing an existing profile, `false` when adding new.
+  - `pub original_name: Option<String>` — original profile name for rename detection during edit.
 
 - `pub struct App` — sole owner of all runtime TUI state.
 
