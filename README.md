@@ -29,6 +29,7 @@ A terminal UI for managing and launching [Claude Code](https://claude.ai/code) a
 | `cct add` | Add a new profile interactively. `--auth-type token` writes `ANTHROPIC_AUTH_TOKEN` instead of `ANTHROPIC_API_KEY` |
 | `cct edit` | Open `profiles.toml` in `$EDITOR` (or `vi`) |
 | `cct run [name]` | Launch a profile by name (case-insensitive). Without a name, shows an interactive numbered picker |
+| `cct env` | List all profiles (non-interactive) |
 | `cct env <profile> -- <cmd> [args...]` | Run any command with a profile's environment variables injected |
 
 ## Install
@@ -104,6 +105,7 @@ OPENAI_API_KEY = "sk-..."
    - `cct run <name>` — launch a profile by name directly
    - `cct run` — interactive numbered picker
    - `cct env <profile> -- <command>` — run a command with a profile's env vars
+   - `cct env` — list all profiles non-interactively
 
 ## Keybindings
 

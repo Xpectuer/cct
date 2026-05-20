@@ -34,10 +34,10 @@ enum Commands {
         /// Profile name to launch (case-insensitive)
         name: Option<String>,
     },
-    /// Run a command with a profile's environment variables
+    /// Run a command with a profile's environment variables, or list profiles when no args given
     Env {
-        /// Profile name whose environment to load
-        profile_name: String,
+        /// Profile name whose environment to load (omit to list all profiles)
+        profile_name: Option<String>,
         /// Command and arguments (preceded by --)
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
@@ -62,7 +62,7 @@ fn main() -> Result<()> {
         Some(Commands::Env {
             profile_name,
             command,
-        }) => run_env(&profile_name, &command),
+        }) => run_env(profile_name.as_deref(), &command),
         None => run_tui(),
     }
 }
@@ -85,12 +85,28 @@ fn run_profile(name: Option<String>) -> Result<()> {
     std::process::exit(1);
 }
 
-fn run_env(profile_name: &str, command: &[String]) -> Result<()> {
+fn run_env(profile_name: Option<&str>, command: &[String]) -> Result<()> {
+    let Some(pn) = profile_name else {
+        let profiles = config::load_profiles()?;
+        if profiles.is_empty() {
+            println!("No profiles configured. Run 'cct add' to create one.");
+            return Ok(());
+        }
+        for p in &profiles {
+            let tag = match p.backend {
+                config::Backend::Claude => "[claude]",
+                config::Backend::Codex => "[codex] ",
+            };
+            let desc = p.description.as_deref().unwrap_or("");
+            println!("{}  {}  {}", p.name, tag, desc);
+        }
+        return Ok(());
+    };
     if command.is_empty() {
         anyhow::bail!("No command specified. Usage: cct env <profile> -- <command> [args...]");
     }
-    let profile = config::find_profile_by_name(profile_name)?
-        .ok_or_else(|| anyhow::anyhow!("Profile '{}' not found.", profile_name))?;
+    let profile = config::find_profile_by_name(pn)?
+        .ok_or_else(|| anyhow::anyhow!("Profile '{}' not found.", pn))?;
     let shell_cmd = shell_words::join(command.iter().map(|s| s.as_str()));
     let err = launch::exec_with_env(&profile, &shell_cmd);
     eprintln!("Error: {err:#}");
@@ -421,7 +437,7 @@ mod tests {
                 profile_name,
                 command,
             }) => {
-                assert_eq!(profile_name, "my-profile");
+                assert_eq!(profile_name.as_deref(), Some("my-profile"));
                 assert_eq!(command, vec!["python", "-c", "print(1)"]);
             }
             _ => panic!("expected Env command"),
@@ -436,7 +452,7 @@ mod tests {
                 profile_name,
                 command,
             }) => {
-                assert_eq!(profile_name, "my-profile");
+                assert_eq!(profile_name.as_deref(), Some("my-profile"));
                 assert_eq!(command, vec!["python", "script.py"]);
             }
             _ => panic!("expected Env command"),
@@ -447,7 +463,26 @@ mod tests {
     fn clap_routing_env_empty_command() {
         let cli = Cli::try_parse_from(["cct", "env", "my-profile"]).unwrap();
         match cli.command {
-            Some(Commands::Env { command, .. }) => {
+            Some(Commands::Env {
+                profile_name,
+                command,
+            }) => {
+                assert_eq!(profile_name.as_deref(), Some("my-profile"));
+                assert!(command.is_empty());
+            }
+            _ => panic!("expected Env command"),
+        }
+    }
+
+    #[test]
+    fn clap_routing_env_no_args_lists_profiles() {
+        let cli = Cli::try_parse_from(["cct", "env"]).unwrap();
+        match cli.command {
+            Some(Commands::Env {
+                profile_name,
+                command,
+            }) => {
+                assert!(profile_name.is_none());
                 assert!(command.is_empty());
             }
             _ => panic!("expected Env command"),
