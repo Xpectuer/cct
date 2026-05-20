@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Agent Installation
+
+See [INSTALL.md](INSTALL.md) for automated cct installation instructions (curl|bash, cargo, manual download).
+
 ## Project Overview
 
 `cct` is a terminal UI launcher for Claude Code and OpenAI Codex. It reads named profiles from a TOML config file (`~/Library/Application Support/cc-tui/profiles.toml` on macOS or `~/.config/cc-tui/profiles.toml` on Linux/other Unix-like systems), displays them in a ratatui TUI organized into Claude/Codex backend tabs, and exec-replaces the process with `claude <args>` or `codex [--full-auto]` when the user selects a profile.
