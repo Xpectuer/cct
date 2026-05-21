@@ -161,6 +161,18 @@ User presses [t] (mode = Normal, profiles non-empty, backend = Claude)
   → app.profiles[app.selected] = reloaded profile
 ```
 
+### Duplicate Profile (key `d`)
+```
+User presses [d] (mode = Normal, profiles non-empty)
+  → FormState::from_profile(&selected)  # prefill all fields from source
+  → form.is_edit = false                # ensure save uses append, not update
+  → form.original_name = None
+  → form.fields[0].push_str("_copy")    # append suffix to name
+  → app.mode = AppMode::AddForm(form)
+  → User can edit any field, then confirm with [y]
+  → save_form → config::append_profile  # creates new profile, original unchanged
+```
+
 ### Hot-reload Config (key `e`)
 ```
 User presses [e]

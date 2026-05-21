@@ -128,6 +128,17 @@ fn enter_edit_mode(app: &mut App) {
     )));
 }
 
+fn enter_duplicate_mode(app: &mut App) {
+    if app.profiles.is_empty() {
+        return;
+    }
+    let mut form = FormState::from_profile(&app.profiles[app.selected]);
+    form.is_edit = false;
+    form.original_name = None;
+    form.fields[0].push_str("_copy");
+    app.mode = AppMode::AddForm(Box::new(form));
+}
+
 fn validate_form_name(
     form: &FormState,
     profiles: &[Profile],
@@ -299,6 +310,9 @@ fn run_tui() -> Result<()> {
                     }
                     (KeyCode::Char('a'), _) => {
                         enter_add_mode(&mut app);
+                    }
+                    (KeyCode::Char('d'), _) => {
+                        enter_duplicate_mode(&mut app);
                     }
                     _ => {}
                 },
@@ -516,6 +530,68 @@ mod tests {
                 assert_eq!(form.original_name.as_deref(), Some("edit-me"));
                 assert_eq!(form.fields[0], "edit-me");
                 assert_eq!(form.fields[3], "sk-ant");
+            }
+            AppMode::Normal => panic!("expected add form"),
+        }
+    }
+
+    #[test]
+    fn d_key_enters_duplicate_form_with_copy_suffix() {
+        let profile = Profile {
+            name: "my-profile".into(),
+            description: Some("Original".into()),
+            env: Some(std::collections::HashMap::from([(
+                "ANTHROPIC_API_KEY".into(),
+                "sk-ant".into(),
+            )])),
+            extra_args: None,
+            skip_permissions: None,
+            model: Some("claude-sonnet-4-6".into()),
+            backend: config::Backend::Claude,
+            base_url: Some("https://example.com/v1".into()),
+            full_auto: None,
+            auth_type: None,
+        };
+        let mut app = App::new(vec![profile]);
+
+        enter_duplicate_mode(&mut app);
+
+        match &app.mode {
+            AppMode::AddForm(form) => {
+                assert!(!form.is_edit, "duplicate should not be edit mode");
+                assert!(
+                    form.original_name.is_none(),
+                    "duplicate should have no original_name"
+                );
+                assert_eq!(form.fields[0], "my-profile_copy");
+                assert_eq!(form.fields[1], "Original");
+                assert_eq!(form.fields[3], "sk-ant");
+            }
+            AppMode::Normal => panic!("expected add form"),
+        }
+    }
+
+    #[test]
+    fn duplicate_always_appends_copy_suffix() {
+        let profile = Profile {
+            name: "existing_copy".into(),
+            description: None,
+            env: None,
+            extra_args: None,
+            skip_permissions: None,
+            model: None,
+            backend: config::Backend::Claude,
+            base_url: None,
+            full_auto: None,
+            auth_type: None,
+        };
+        let mut app = App::new(vec![profile]);
+
+        enter_duplicate_mode(&mut app);
+
+        match &app.mode {
+            AppMode::AddForm(form) => {
+                assert_eq!(form.fields[0], "existing_copy_copy");
             }
             AppMode::Normal => panic!("expected add form"),
         }

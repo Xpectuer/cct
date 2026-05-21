@@ -55,7 +55,7 @@ The app is five focused modules with no shared mutable state:
 - Config hot-reload on `e`: editor opens, then profiles are re-parsed in-place without restart.
 - `FormState::to_new_profile()` is the single source of truth for form-field-index → semantic mapping per backend.
 - Codex launch: `generate_codex_config` writes `~/.config/cct-tui/codex/config.toml` from profile fields; `CODEX_HOME` is set before exec.
-- `s` key toggles `skip_permissions` on the selected Claude profile; `t` key toggles `auth_type` between `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN`; both persisted via `toml_edit` to preserve comments.
+- `s` key toggles `skip_permissions` on the selected Claude profile; `t` key toggles `auth_type` between `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN`; `d` key duplicates the selected profile (appends `_copy` to name, opens pre-filled add form); all persisted via `toml_edit` to preserve comments.
 - On startup, if `claude` is missing, `prompt_install()` offers to run the official installer before entering raw mode.
 
 ## Config File Format

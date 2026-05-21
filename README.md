@@ -13,6 +13,7 @@ A terminal UI for managing and launching [Claude Code](https://claude.ai/code) a
 - **TUI selector** — ratatui-based list+detail panel with keyboard navigation, organized into Claude/Codex tabs
 - **Inline profile creation** — press `a` in the TUI to open a 6-field add form (backend-aware: Claude gets Pro Model + Fast Model; Codex gets Model + Full Auto), or run `cct add` from the CLI
 - **Inline profile editing** — press `e` on a selected profile to open a prefilled edit form, update the fields inline, and save back to `profiles.toml`
+- **Profile duplication** — press `d` on a selected profile to duplicate it (appends `_copy` to the name), edit any fields, and save as a new profile
 - **Auto-populated env vars** — providing `base_url`, `api_key`, or `model` in the add flow generates a `[profiles.env]` section with all relevant env vars pre-filled (Anthropic vars for Claude, `OPENAI_API_KEY` for Codex)
 - **Sensitive value masking** — env keys containing `TOKEN`, `KEY`, or `SECRET` are redacted in the UI
 - **skip_permissions / full_auto toggle** — press `s` to toggle `--dangerously-skip-permissions` on Claude profiles or `--full-auto` on Codex profiles; the change is persisted immediately to `profiles.toml`
@@ -123,6 +124,7 @@ OPENAI_API_KEY = "sk-..."
 | `s` | Toggle `skip_permissions` (Claude) or `full_auto` (Codex) on selected profile |
 | `t` | Toggle auth type between `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` (Claude only) |
 | `a` | Open inline add-profile form (uses active backend tab) |
+| `d` | Duplicate the selected profile (appends `_copy` to name) |
 | `e` | Edit the selected profile inline |
 | `q` / `Ctrl-C` | Quit |
 

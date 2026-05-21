@@ -73,10 +73,10 @@ fn confirmation_prompt(form: &FormState) -> &'static str {
 fn normal_footer_text(backend: &Backend) -> &'static str {
     match backend {
         Backend::Claude => {
-            " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [c] Resume  [s] Skip-perms  [t] Auth  [a] Add  [e] Edit  [q] Quit"
+            " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [c] Resume  [s] Skip-perms  [t] Auth  [a] Add  [d] Duplicate  [e] Edit  [q] Quit"
         }
         Backend::Codex => {
-            " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [s] Full-auto  [a] Add  [e] Edit  [q] Quit"
+            " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [s] Full-auto  [a] Add  [d] Duplicate  [e] Edit  [q] Quit"
         }
     }
 }
@@ -412,6 +412,7 @@ mod tests {
     fn ui_footer_shows_add_hint() {
         let claude_footer = normal_footer_text(&Backend::Claude);
         assert!(claude_footer.contains("[a] Add"));
+        assert!(claude_footer.contains("[d] Duplicate"));
         assert!(claude_footer.contains("[s] Skip-perms"));
         assert!(claude_footer.contains("[t] Auth"));
         assert!(claude_footer.contains("[c] Resume"));
@@ -421,6 +422,7 @@ mod tests {
 
         let codex_footer = normal_footer_text(&Backend::Codex);
         assert!(codex_footer.contains("[a] Add"));
+        assert!(codex_footer.contains("[d] Duplicate"));
         assert!(codex_footer.contains("[s] Full-auto"));
         assert!(codex_footer.contains("[e] Edit"));
         assert!(
