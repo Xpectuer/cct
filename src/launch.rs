@@ -46,6 +46,7 @@ pub fn build_launch_command(profile: &Profile, with_continue: bool) -> (String, 
 /// Inject profile env vars and exec-replace the current process with `claude`.
 /// Returns only on error (process was not replaced).
 pub fn exec_claude(profile: &Profile, with_continue: bool) -> anyhow::Error {
+    env::set_var("DISABLE_AUTOUPDATER", "1");
     if let Some(env_map) = &profile.env {
         for (k, v) in env_map {
             env::set_var(k, v);
@@ -161,6 +162,7 @@ pub fn command_exists(cmd: &str) -> bool {
 /// Inject profile env vars and exec-replace with the command wrapped in `bash -c`.
 /// Returns only on error (process was not replaced).
 pub fn exec_with_env(profile: &Profile, shell_cmd: &str) -> anyhow::Error {
+    env::set_var("DISABLE_AUTOUPDATER", "1");
     if let Some(env_map) = &profile.env {
         for (k, v) in env_map {
             env::set_var(k, v);
