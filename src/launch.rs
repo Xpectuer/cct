@@ -47,6 +47,7 @@ pub fn build_launch_command(profile: &Profile, with_continue: bool) -> (String, 
 /// Returns only on error (process was not replaced).
 pub fn exec_claude(profile: &Profile, with_continue: bool) -> anyhow::Error {
     env::set_var("DISABLE_AUTOUPDATER", "1");
+    env::set_var("CLAUDE_CODE_ATTRIBUTION_HEADER", "0");
     if let Some(env_map) = &profile.env {
         for (k, v) in env_map {
             env::set_var(k, v);
@@ -163,6 +164,7 @@ pub fn command_exists(cmd: &str) -> bool {
 /// Returns only on error (process was not replaced).
 pub fn exec_with_env(profile: &Profile, shell_cmd: &str) -> anyhow::Error {
     env::set_var("DISABLE_AUTOUPDATER", "1");
+    env::set_var("CLAUDE_CODE_ATTRIBUTION_HEADER", "0");
     if let Some(env_map) = &profile.env {
         for (k, v) in env_map {
             env::set_var(k, v);
