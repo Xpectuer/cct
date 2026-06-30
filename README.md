@@ -108,6 +108,16 @@ OPENAI_API_KEY = "sk-..."
    - `cct env <profile> -- <command>` — run a command with a profile's env vars
    - `cct env` — list all profiles non-interactively
 
+## Tips
+
+**Pass arbitrary flags to Claude.** `cct env` injects a profile's environment and runs whatever command you give it — the command doesn't need to be aware of `cct` at all. To launch Claude with extra flags that `cct` doesn't natively expose:
+
+```bash
+cct env my-profile claude --model haiku --verbose --continue
+```
+
+This follows the Unix principle: design interfaces that compose with software you've never heard of. `cct env` doesn't know about `claude` flags, and `claude` doesn't know about `cct` — they just work together through the shell.
+
 ## Keybindings
 
 ### Normal Mode
