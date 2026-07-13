@@ -100,18 +100,29 @@ pub fn write_proxy_config(codex_home: &Path, model: &str, port: u16) -> Result<(
 }
 
 /// Ensure the proxy is running. Spawns `cct proxy` if needed.
+///
+/// When `CCT_PROXY_LOG` is set, stderr is written to `~/.config/cc-tui/proxy.log`
+/// instead of being discarded — useful for debugging proxy behavior.
 pub fn ensure_proxy_running(_port: u16, socket_path: &Path) -> Result<()> {
     if crate::proxy::check_proxy_running(socket_path) {
         return Ok(());
     }
     let exe = std::env::current_exe().context("cannot find own executable")?;
-    std::process::Command::new(exe)
-        .arg("proxy")
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("proxy")
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .context("failed to spawn cct proxy")?;
+        .stdout(std::process::Stdio::null());
+
+    if std::env::var("CCT_PROXY_LOG").is_ok() {
+        let log_path = crate::proxy::proxy_log_path();
+        if let Ok(file) = std::fs::File::create(&log_path) {
+            cmd.stderr(file);
+        }
+    } else {
+        cmd.stderr(std::process::Stdio::null());
+    }
+
+    cmd.spawn().context("failed to spawn cct proxy")?;
 
     // Wait up to 5s for the socket to appear.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);

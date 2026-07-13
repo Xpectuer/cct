@@ -5,8 +5,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use bytes::Bytes;
-use http_body_util::{BodyExt, Full};
-use hyper::body::Incoming;
+use futures_util::TryStreamExt;
+use http_body_util::{BodyExt, Full, StreamBody};
+use hyper::body::{Frame, Incoming};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
@@ -67,6 +68,23 @@ pub fn proxy_socket_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("~/.config"))
         .join("cc-tui")
         .join("proxy.sock")
+}
+
+/// Path to the proxy log file (only used when `CCT_PROXY_LOG` is set).
+pub fn proxy_log_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("~/.config"))
+        .join("cc-tui")
+        .join("proxy.log")
+}
+
+/// Log a message to stderr when `CCT_PROXY_LOG` is set.
+macro_rules! log_proxy {
+    ($($arg:tt)*) => {
+        if std::env::var("CCT_PROXY_LOG").is_ok() {
+            eprintln!("[cct-proxy] {}", format!($($arg)*));
+        }
+    };
 }
 
 /// Check whether the proxy daemon is currently running.
@@ -158,6 +176,8 @@ pub fn run_foreground(port: u16) -> io::Result<()> {
 }
 
 async fn run_proxy(port: u16, socket_path: &Path) {
+    log_proxy!("starting on 127.0.0.1:{port}, control socket {socket_path:?}");
+
     let state = Arc::new(ProxyState {
         active: RwLock::new(ActiveProfile::default()),
     });
@@ -165,6 +185,7 @@ async fn run_proxy(port: u16, socket_path: &Path) {
     let _ = std::fs::remove_file(socket_path);
 
     let ctl_listener = UnixListener::bind(socket_path).expect("bind proxy control socket");
+    log_proxy!("control socket bound");
 
     let ctl_state = state.clone();
     let ctl_path = socket_path.to_path_buf();
@@ -203,11 +224,25 @@ async fn run_proxy(port: u16, socket_path: &Path) {
 
 // ── HTTP handler ──────────────────────────────────────────────────────────
 
+type ProxyBody =
+    http_body_util::combinators::BoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>>;
+
 async fn handle_request(
     req: Request<Incoming>,
     state: Arc<ProxyState>,
-) -> Result<Response<Full<Bytes>>, hyper::Error> {
+) -> Result<Response<ProxyBody>, hyper::Error> {
+    let method = req.method().clone();
+    let path_and_query = req
+        .uri()
+        .path_and_query()
+        .map(|pq| pq.as_str())
+        .unwrap_or("/")
+        .to_string();
+
+    log_proxy!("<< {method} {path_and_query}");
+
     if req.uri().path().is_empty() || !req.uri().path().starts_with("/v1") {
+        log_proxy!(">> 404 (path not /v1)");
         return Ok(plain_response(
             StatusCode::NOT_FOUND,
             "cct proxy — no upstream configured for this path\n",
@@ -217,6 +252,7 @@ async fn handle_request(
     let active = {
         let guard = state.active.read().unwrap();
         if guard.base_url.is_empty() {
+            log_proxy!(">> 502 (no active profile)");
             return Ok(plain_response(
                 StatusCode::BAD_GATEWAY,
                 "cct proxy — no active profile. Launch a profile from cct first.\n",
@@ -229,19 +265,23 @@ async fn handle_request(
         }
     };
 
-    // Save method and path before deconstructing req.
-    let method = req.method().clone();
-    let path_and_query = req
-        .uri()
-        .path_and_query()
-        .map(|pq| pq.as_str())
-        .unwrap_or("/")
-        .to_string();
     let upstream_url = format!(
         "{}{}",
         active.base_url.trim_end_matches('/'),
         path_and_query
     );
+
+    log_proxy!(
+        "-> upstream {method} {upstream_url} (model={})",
+        active.model
+    );
+
+    // Snapshot Content-Type before req is consumed by body collection.
+    let content_type = req
+        .headers()
+        .get("Content-Type")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
 
     // Collect incoming body (consumes req).
     let body_bytes = req
@@ -262,11 +302,19 @@ async fn handle_request(
         upstream_req = upstream_req.header("Authorization", format!("Bearer {}", active.api_key));
     }
 
+    if let Some(ct) = &content_type {
+        upstream_req = upstream_req.header("Content-Type", ct.as_str());
+    }
+
     match upstream_req.send().await {
         Ok(upstream_resp) => {
-            let status = StatusCode::from_u16(upstream_resp.status().as_u16())
-                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-            // Snapshot headers before consuming body with .bytes().
+            let upstream_status = upstream_resp.status().as_u16();
+            let status =
+                StatusCode::from_u16(upstream_status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+
+            log_proxy!("<< upstream {upstream_status} (streaming)");
+
+            // Snapshot response headers before streaming the body.
             let headers: Vec<(String, String)> = upstream_resp
                 .headers()
                 .iter()
@@ -278,28 +326,43 @@ async fn handle_request(
                     )
                 })
                 .collect();
-            let resp_bytes = upstream_resp.bytes().await.unwrap_or_default();
+
+            // Stream upstream response body chunk-by-chunk (critical for SSE).
+            let byte_stream = upstream_resp.bytes_stream();
+            let frame_stream = byte_stream
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+                .map_ok(Frame::data);
+            let body = StreamBody::new(frame_stream).boxed();
 
             let mut resp = Response::builder().status(status);
             for (name, value) in &headers {
                 resp = resp.header(name.as_str(), value.as_str());
             }
-            Ok(resp
-                .body(Full::new(resp_bytes))
-                .expect("build proxy response"))
+            Ok(resp.body(body).expect("build proxy response"))
         }
-        Err(e) => Ok(plain_response(
-            StatusCode::BAD_GATEWAY,
-            format!("cct proxy — upstream unreachable: {e}\n"),
-        )),
+        Err(e) => {
+            log_proxy!("<< upstream error: {e}");
+            Ok(plain_response(
+                StatusCode::BAD_GATEWAY,
+                format!("cct proxy — upstream unreachable: {e}\n"),
+            ))
+        }
     }
 }
 
-fn plain_response(status: StatusCode, body: impl Into<String>) -> Response<Full<Bytes>> {
+fn plain_response(status: StatusCode, body: impl Into<String>) -> Response<ProxyBody> {
+    let bytes = Bytes::from(body.into().into_bytes());
+    let body = Full::new(bytes)
+        .map_err(
+            |_: std::convert::Infallible| -> Box<dyn std::error::Error + Send + Sync> {
+                unreachable!()
+            },
+        )
+        .boxed();
     Response::builder()
         .status(status)
         .header("Content-Type", "text/plain")
-        .body(Full::new(Bytes::from(body.into().into_bytes())))
+        .body(body)
         .expect("build error response")
 }
 
@@ -324,6 +387,7 @@ fn handle_control(mut stream: UnixStream, state: Arc<ProxyState>) {
     let mut reader = BufReader::new(&stream);
     let mut line = String::new();
     if reader.read_line(&mut line).is_err() || line.trim().is_empty() {
+        log_proxy!("ctl << empty command");
         let _ = write_control_response(
             &mut stream,
             &ControlResponse {
@@ -339,6 +403,7 @@ fn handle_control(mut stream: UnixStream, state: Arc<ProxyState>) {
     let cmd: ControlCommand = match serde_json::from_str(line.trim()) {
         Ok(c) => c,
         Err(e) => {
+            log_proxy!("ctl << invalid JSON: {e}");
             let _ = write_control_response(
                 &mut stream,
                 &ControlResponse {
@@ -352,6 +417,8 @@ fn handle_control(mut stream: UnixStream, state: Arc<ProxyState>) {
         }
     };
 
+    log_proxy!("ctl << {}", line.trim());
+
     match cmd.cmd.as_str() {
         "switch" => {
             let base_url = cmd.base_url.unwrap_or_default();
@@ -363,6 +430,7 @@ fn handle_control(mut stream: UnixStream, state: Arc<ProxyState>) {
                 active.api_key = api_key;
                 active.model = model.clone();
             }
+            log_proxy!("ctl >> ok (switched to base_url={base_url}, model={model})");
             let _ = write_control_response(
                 &mut stream,
                 &ControlResponse {
@@ -375,6 +443,11 @@ fn handle_control(mut stream: UnixStream, state: Arc<ProxyState>) {
         }
         "status" => {
             let active = state.active.read().unwrap();
+            log_proxy!(
+                "ctl >> status (base_url={}, model={})",
+                active.base_url,
+                active.model
+            );
             let _ = write_control_response(
                 &mut stream,
                 &ControlResponse {
@@ -394,6 +467,7 @@ fn handle_control(mut stream: UnixStream, state: Arc<ProxyState>) {
             );
         }
         "shutdown" => {
+            log_proxy!("ctl >> ok (shutting down)");
             let _ = write_control_response(
                 &mut stream,
                 &ControlResponse {
@@ -406,6 +480,7 @@ fn handle_control(mut stream: UnixStream, state: Arc<ProxyState>) {
             std::process::exit(0);
         }
         other => {
+            log_proxy!("ctl >> err (unknown command: {other})");
             let _ = write_control_response(
                 &mut stream,
                 &ControlResponse {

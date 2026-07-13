@@ -43,7 +43,7 @@ enum Commands {
         command: Vec<String>,
     },
     /// Start the local proxy daemon (internal use)
-    #[command(hide = true)]
+    #[command(name = "proxy")]
     Proxy,
 }
 
