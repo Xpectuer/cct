@@ -11,6 +11,75 @@ pub enum Backend {
     Codex,
 }
 
+/// Approval level for Codex profiles. Stored as a string in TOML,
+/// but accepts `true` / `false` booleans for backward compatibility.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ApprovalLevel {
+    /// `--ask-for-approval untrusted` — only trusted commands auto-run
+    Untrusted,
+    /// `--ask-for-approval never` — never ask for approval (still sandboxed)
+    Never,
+    /// `--dangerously-bypass-approvals-and-sandbox` — no approvals, no sandbox
+    Danger,
+}
+
+impl ApprovalLevel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ApprovalLevel::Untrusted => "untrusted",
+            ApprovalLevel::Never => "never",
+            ApprovalLevel::Danger => "danger",
+        }
+    }
+
+    /// Next level in the cycle (None → Untrusted → Never → Danger → None).
+    pub fn next(current: &Option<ApprovalLevel>) -> Option<ApprovalLevel> {
+        match current {
+            None => Some(ApprovalLevel::Untrusted),
+            Some(ApprovalLevel::Untrusted) => Some(ApprovalLevel::Never),
+            Some(ApprovalLevel::Never) => Some(ApprovalLevel::Danger),
+            Some(ApprovalLevel::Danger) => None,
+        }
+    }
+}
+
+/// Custom deserializer: accepts `"untrusted"`, `"never"`, `"danger"` strings,
+/// and `true` / `false` booleans for backward compatibility.
+fn deserialize_approval<'de, D>(d: D) -> Result<Option<ApprovalLevel>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let raw: Option<toml::Value> = Option::deserialize(d)?;
+    match raw {
+        None => Ok(None),
+        Some(toml::Value::Boolean(b)) => {
+            if b { Ok(Some(ApprovalLevel::Danger)) } else { Ok(None) }
+        }
+        Some(toml::Value::String(s)) => match s.as_str() {
+            "danger" => Ok(Some(ApprovalLevel::Danger)),
+            "never" => Ok(Some(ApprovalLevel::Never)),
+            "untrusted" => Ok(Some(ApprovalLevel::Untrusted)),
+            other => Err(Error::custom(format!(
+                "invalid approval level: {other:?}, expected one of: untrusted, never, danger"
+            ))),
+        },
+        Some(other) => Err(Error::custom(format!(
+            "expected string or bool for full_auto, got {other:?}"
+        ))),
+    }
+}
+
+/// Approval level label for the footer / detail panel.
+pub fn approval_label(level: &Option<ApprovalLevel>) -> &'static str {
+    match level {
+        None => "on-request",
+        Some(ApprovalLevel::Untrusted) => "untrusted",
+        Some(ApprovalLevel::Never) => "never",
+        Some(ApprovalLevel::Danger) => "danger",
+    }
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct Profile {
     pub name: String,
@@ -22,7 +91,8 @@ pub struct Profile {
     #[serde(default)]
     pub backend: Backend,
     pub base_url: Option<String>,
-    pub full_auto: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_approval")]
+    pub full_auto: Option<ApprovalLevel>,
     #[serde(default)]
     pub auth_type: Option<String>,
 }
@@ -76,7 +146,7 @@ pub fn validate_profiles(profiles: &[Profile]) -> Result<()> {
                 p.name
             );
         }
-        if p.backend == Backend::Claude && p.full_auto.unwrap_or(false) {
+        if p.backend == Backend::Claude && p.full_auto.is_some() {
             anyhow::bail!(
                 "Profile {:?}: claude backend does not support full_auto",
                 p.name
@@ -103,7 +173,7 @@ pub struct NewProfile {
     pub model: Option<String>,
     pub fast_model: Option<String>,
     pub backend: Backend,
-    pub full_auto: Option<bool>,
+    pub full_auto: Option<ApprovalLevel>,
     pub auth_type: Option<String>,
 }
 
@@ -127,14 +197,6 @@ fn non_empty(opt: &Option<String>) -> Option<&str> {
 fn set_optional_string(entry: &mut Table, key: &str, new_value: Option<&str>) {
     if let Some(new_str) = new_value {
         entry[key] = value(new_str);
-    } else {
-        entry.remove(key);
-    }
-}
-
-fn set_optional_bool(entry: &mut Table, key: &str, new_value: Option<bool>) {
-    if let Some(new_bool) = new_value {
-        entry[key] = value(new_bool);
     } else {
         entry.remove(key);
     }
@@ -252,7 +314,7 @@ pub fn update_profile(original_name: &str, updated: &NewProfile) -> Result<()> {
         Backend::Codex => {
             entry["backend"] = value("codex");
             entry.remove("description");
-            set_optional_bool(entry, "full_auto", updated.full_auto);
+            set_optional_string(entry, "full_auto", updated.full_auto.as_ref().map(|a| a.as_str()));
 
             let env = ensure_env_table(entry);
             set_optional_string(env, "OPENAI_API_KEY", non_empty(&updated.api_key));
@@ -286,8 +348,8 @@ pub fn append_profile(profile: &NewProfile) -> Result<()> {
     if let Some(base_url) = non_empty(&profile.base_url) {
         block.push_str(&format!("base_url = {:?}\n", base_url));
     }
-    if let Some(full_auto) = profile.full_auto {
-        block.push_str(&format!("full_auto = {full_auto}\n"));
+    if let Some(full_auto) = &profile.full_auto {
+        block.push_str(&format!("full_auto = {:?}\n", full_auto.as_str()));
     }
     if profile.auth_type.as_deref() == Some("token") {
         block.push_str("auth_type = \"token\"\n");
@@ -420,9 +482,10 @@ pub fn toggle_auth_type(profile_name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Toggle `full_auto` for a named Codex profile in the config file.
+/// Set `full_auto` approval level for a named Codex profile in the config file.
+/// `new_value` is the string form (`"untrusted"`, `"never"`, `"danger"`) or `None` to remove.
 /// Uses toml_edit for surgical edits that preserve comments and formatting.
-pub fn toggle_full_auto(profile_name: &str, new_value: bool) -> Result<()> {
+pub fn toggle_full_auto(profile_name: &str, new_value: Option<&str>) -> Result<()> {
     let path = config_path();
     let content = fs::read_to_string(&path).with_context(|| format!("read config {path:?}"))?;
     let mut doc = content
@@ -439,7 +502,7 @@ pub fn toggle_full_auto(profile_name: &str, new_value: bool) -> Result<()> {
         .find(|t| t.get("name").and_then(|v| v.as_str()) == Some(profile_name))
         .with_context(|| format!("profile {profile_name:?} not found in config"))?;
 
-    entry["full_auto"] = value(new_value);
+    set_optional_string(entry, "full_auto", new_value);
     fs::write(&path, doc.to_string()).with_context(|| format!("write config {path:?}"))?;
     Ok(())
 }
@@ -967,7 +1030,7 @@ base_url = "https://api.example.com/v1"
             model: None,
             backend: Backend::Claude,
             base_url: None,
-            full_auto: Some(true),
+            full_auto: Some(ApprovalLevel::Danger),
             auth_type: None,
         }];
         let result = validate_profiles(&profiles);
@@ -991,7 +1054,7 @@ base_url = "https://api.example.com/v1"
         .unwrap();
         std::env::set_var("CCT_CONFIG", &path);
 
-        let result = toggle_full_auto("missing", true);
+        let result = toggle_full_auto("missing", Some("danger"));
         assert!(result.is_err());
 
         std::env::remove_var("CCT_CONFIG");
@@ -1009,13 +1072,13 @@ base_url = "https://api.example.com/v1"
         .unwrap();
         std::env::set_var("CCT_CONFIG", &path);
 
-        toggle_full_auto("codex-test", false).unwrap();
+        toggle_full_auto("codex-test", None).unwrap();
         let profiles = load_profiles().unwrap();
-        assert_eq!(profiles[0].full_auto, Some(false));
+        assert_eq!(profiles[0].full_auto, None);
 
-        toggle_full_auto("codex-test", true).unwrap();
+        toggle_full_auto("codex-test", Some("danger")).unwrap();
         let profiles = load_profiles().unwrap();
-        assert_eq!(profiles[0].full_auto, Some(true));
+        assert_eq!(profiles[0].full_auto, Some(ApprovalLevel::Danger));
 
         std::env::remove_var("CCT_CONFIG");
     }
@@ -1034,9 +1097,9 @@ base_url = "https://api.example.com/v1"
         .unwrap();
         std::env::set_var("CCT_CONFIG", &path);
 
-        toggle_full_auto("codex-test", true).unwrap();
+        toggle_full_auto("codex-test", Some("danger")).unwrap();
         let profiles = load_profiles().unwrap();
-        assert_eq!(profiles[0].full_auto, Some(true));
+        assert_eq!(profiles[0].full_auto, Some(ApprovalLevel::Danger));
 
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("# comment"), "comment should be preserved");
@@ -1060,7 +1123,7 @@ base_url = "https://api.example.com/v1"
             model: Some("o3".into()),
             fast_model: None,
             backend: Backend::Codex,
-            full_auto: Some(true),
+            full_auto: Some(ApprovalLevel::Danger),
             auth_type: None,
         };
         append_profile(&new).unwrap();
@@ -1087,10 +1150,10 @@ base_url = "https://api.example.com/v1"
             appended_block.contains("backend = \"codex\""),
             "Expected backend field in output, got:\n{appended_block}"
         );
-        // Should contain full_auto = true
+        // Should contain full_auto = "danger"
         assert!(
-            appended_block.contains("full_auto = true"),
-            "Expected full_auto field in output, got:\n{appended_block}"
+            appended_block.contains("full_auto = \"danger\""),
+            "Expected full_auto = \\\"danger\\\" in output, got:\n{appended_block}"
         );
         // Should contain base_url as a profile-level field
         assert!(
@@ -1131,7 +1194,7 @@ OPENAI_API_KEY = "sk-old"
             model: Some("gpt-5.4".into()),
             fast_model: None,
             backend: Backend::Codex,
-            full_auto: Some(true),
+            full_auto: Some(ApprovalLevel::Danger),
             auth_type: None,
         };
 
@@ -1145,7 +1208,7 @@ OPENAI_API_KEY = "sk-old"
         );
         assert_eq!(profile.base_url.as_deref(), Some("https://new.example/v1"));
         assert_eq!(profile.model.as_deref(), Some("gpt-5.4"));
-        assert_eq!(profile.full_auto, Some(true));
+        assert_eq!(profile.full_auto, Some(ApprovalLevel::Danger));
         assert_eq!(
             profile
                 .env

@@ -76,7 +76,7 @@ fn normal_footer_text(backend: &Backend) -> &'static str {
             " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [c] Resume  [s] Skip-perms  [t] Auth  [a] Add  [d] Duplicate  [e] Edit  [q] Quit"
         }
         Backend::Codex => {
-            " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [s] Full-auto  [a] Add  [d] Duplicate  [e] Edit  [q] Quit"
+            " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [s] Approval  [a] Add  [d] Duplicate  [e] Edit  [q] Quit"
         }
     }
 }
@@ -123,10 +123,16 @@ pub fn draw(app: &App, frame: &mut Frame) {
                     Backend::Claude if p.skip_permissions.unwrap_or(false) => {
                         item.style(Style::default().fg(Color::Red))
                     }
-                    Backend::Codex if p.full_auto.unwrap_or(false) => {
-                        item.style(Style::default().fg(Color::Yellow))
+                    Backend::Codex => {
+                        // Color by approval level: green (safest) → yellow → red (most dangerous)
+                        let color = match &p.full_auto {
+                            Some(crate::config::ApprovalLevel::Untrusted) => Color::Green,
+                            Some(crate::config::ApprovalLevel::Never) => Color::Yellow,
+                            Some(crate::config::ApprovalLevel::Danger) => Color::Red,
+                            None => Color::White, // on-request: default, white
+                        };
+                        item.style(Style::default().fg(color))
                     }
-                    Backend::Codex => item.style(Style::default().fg(Color::White)),
                     _ => item,
                 }
             })
@@ -217,9 +223,7 @@ fn build_detail(profile: &Profile) -> Vec<Line<'static>> {
             }
         }
         Backend::Codex => {
-            if profile.full_auto.unwrap_or(false) {
-                lines.push(Line::from("full_auto: \u{2713}"));
-            }
+            lines.push(Line::from(format!("approval: {}", crate::config::approval_label(&profile.full_auto))));
         }
     }
     if let Some(extra) = &profile.extra_args {
@@ -423,7 +427,7 @@ mod tests {
         let codex_footer = normal_footer_text(&Backend::Codex);
         assert!(codex_footer.contains("[a] Add"));
         assert!(codex_footer.contains("[d] Duplicate"));
-        assert!(codex_footer.contains("[s] Full-auto"));
+        assert!(codex_footer.contains("[s] Approval"));
         assert!(codex_footer.contains("[e] Edit"));
         assert!(
             !codex_footer.contains("[c] Resume"),
@@ -505,7 +509,7 @@ mod tests {
             extra_args: None,
             backend: Backend::Codex,
             base_url: Some("https://api.openai.com".into()),
-            full_auto: Some(true),
+            full_auto: Some(crate::config::ApprovalLevel::Danger),
             auth_type: None,
         };
 
@@ -516,10 +520,10 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
 
-        // Should show full_auto instead of skip_permissions
+        // Should show approval level instead of skip_permissions
         assert!(
-            joined.contains("full_auto:"),
-            "Expected 'full_auto:' in codex detail, got:\n{joined}"
+            joined.contains("approval:"),
+            "Expected 'approval:' in codex detail, got:\n{joined}"
         );
         assert!(
             !joined.contains("skip_permissions:"),
@@ -552,7 +556,7 @@ mod tests {
         );
         assert!(
             !joined.contains("full_auto:"),
-            "Should NOT show 'full_auto:' for claude profile, got:\n{joined}"
+            "Should NOT show 'approval:' for claude profile, got:\n{joined}"
         );
     }
 
@@ -615,7 +619,7 @@ mod tests {
             "Codex form must show 'Base URL' label"
         );
         assert!(
-            joined.contains("Full Auto"),
+            joined.contains("Approval"),
             "Codex form must show 'Full Auto' label"
         );
         // Must NOT contain claude-only label "Description"
@@ -652,7 +656,7 @@ mod tests {
         );
         assert!(joined.contains("Model"), "Confirm must show 'Model' label");
         assert!(
-            joined.contains("Full Auto"),
+            joined.contains("Approval"),
             "Confirm must show 'Full Auto' label"
         );
         assert!(

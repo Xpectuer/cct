@@ -8,6 +8,20 @@ use std::{
     process::Command,
 };
 
+/// Resolve the real Codex home directory without side effects.
+/// Respects `CODEX_HOME` env var; falls back to `~/.codex`.
+fn codex_home_dir() -> PathBuf {
+    if let Ok(home) = env::var("CODEX_HOME") {
+        let p = PathBuf::from(&home);
+        if p.is_absolute() && p.exists() {
+            return p;
+        }
+    }
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("~"))
+        .join(".codex")
+}
+
 /// Restore terminal to cooked mode. Must be called before exec or editor spawn.
 pub fn restore_terminal() {
     let _ = crossterm::terminal::disable_raw_mode();
@@ -71,13 +85,30 @@ pub fn check_codex_installed() -> bool {
 
 /// Generate codex config.toml at a specified directory.
 /// Content is derived from the profile's name, model, and base_url fields.
+///
+/// When an API key is present in profile.env, uses `env_key` to reference it.
+/// Otherwise falls back to `requires_openai_auth` for ChatGPT login flow.
 pub fn generate_codex_config(profile: &Profile, codex_home: &Path) -> anyhow::Result<()> {
     fs::create_dir_all(codex_home)?;
     let model = profile.model.as_deref().unwrap_or("gpt-4.1");
     let name = &profile.name;
     let base_url = profile.base_url.as_deref().unwrap_or("");
+    let has_api_key = profile
+        .env
+        .as_ref()
+        .and_then(|m| m.get("OPENAI_API_KEY"))
+        .map(|k| !k.is_empty())
+        .unwrap_or(false);
+
+    // Use env_key when an API key is provided; requires_openai_auth otherwise
+    let auth_line = if has_api_key {
+        "env_key = \"OPENAI_API_KEY\"\n"
+    } else {
+        "requires_openai_auth = true\n"
+    };
+
     let config_content = format!(
-        "model_provider = \"custom\"\nmodel = \"{model}\"\n\n[model_providers.custom]\nname = \"{name}\"\nbase_url = \"{base_url}\"\nrequires_openai_auth = true\n"
+        "model_provider = \"custom\"\nmodel = \"{model}\"\n\n[model_providers.custom]\nname = \"{name}\"\nbase_url = \"{base_url}\"\nwire_api = \"responses\"\n{auth_line}"
     );
     fs::write(codex_home.join("config.toml"), config_content)?;
     Ok(())
@@ -96,11 +127,118 @@ pub fn write_codex_auth(profile: &Profile, codex_home: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Verify that the written config.toml contains the expected values from the profile.
+/// Reads back the file and checks key fields. Returns an error if verification fails.
+fn verify_codex_config(profile: &Profile, codex_home: &Path) -> Result<()> {
+    let config_path = codex_home.join("config.toml");
+    let content = fs::read_to_string(&config_path)
+        .with_context(|| format!("cannot read back config.toml at {}", config_path.display()))?;
+
+    let model = profile.model.as_deref().unwrap_or("gpt-4.1");
+    let base_url = profile.base_url.as_deref().unwrap_or("");
+    let has_api_key = profile
+        .env
+        .as_ref()
+        .and_then(|m| m.get("OPENAI_API_KEY"))
+        .map(|k| !k.is_empty())
+        .unwrap_or(false);
+
+    // Verify core fields are present
+    let checks = [
+        ("model_provider = \"custom\"", "model_provider"),
+        (&format!("model = \"{model}\""), "model"),
+        ("[model_providers.custom]", "provider table"),
+        (&format!("name = \"{}\"", profile.name), "provider name"),
+        (&format!("base_url = \"{base_url}\""), "base_url"),
+        ("wire_api = \"responses\"", "wire_api"),
+    ];
+
+    for (expected, label) in &checks {
+        if !content.contains(expected) {
+            anyhow::bail!(
+                "config.toml verification failed: missing expected content for {label}\n\
+                 expected: {expected}\n\
+                 file: {}",
+                config_path.display(),
+            );
+        }
+    }
+
+    // Verify auth method
+    if has_api_key {
+        if !content.contains("env_key = \"OPENAI_API_KEY\"") {
+            anyhow::bail!(
+                "config.toml verification failed: expected env_key for API key profile\n\
+                 file: {}",
+                config_path.display(),
+            );
+        }
+    } else if !content.contains("requires_openai_auth = true") {
+        anyhow::bail!(
+            "config.toml verification failed: expected requires_openai_auth for non-API-key profile\n\
+             file: {}",
+            config_path.display(),
+        );
+    }
+
+    Ok(())
+}
+
+/// Verify that the written auth.json is valid and contains the expected API key.
+/// Skips verification if no API key is configured (file won't exist).
+fn verify_codex_auth(profile: &Profile, codex_home: &Path) -> Result<()> {
+    let expected_key = profile
+        .env
+        .as_ref()
+        .and_then(|m| m.get("OPENAI_API_KEY"));
+
+    let auth_path = codex_home.join("auth.json");
+
+    match expected_key {
+        Some(key) if !key.is_empty() => {
+            let content = fs::read_to_string(&auth_path).with_context(|| {
+                format!("cannot read back auth.json at {}", auth_path.display())
+            })?;
+            if !content.contains("\"auth_mode\": \"apikey\"") {
+                anyhow::bail!(
+                    "auth.json verification failed: missing auth_mode\nfile: {}",
+                    auth_path.display(),
+                );
+            }
+            if !content.contains(key) {
+                anyhow::bail!(
+                    "auth.json verification failed: API key mismatch\nfile: {}",
+                    auth_path.display(),
+                );
+            }
+        }
+        _ => {
+            // No API key configured — auth.json should NOT exist (or may be user's own)
+            // We don't enforce absence since the user may have pre-existing auth
+        }
+    }
+
+    Ok(())
+}
+
 /// Build the CLI argument list for `codex` from a profile. Pure — no side effects.
 pub fn build_codex_args(profile: &Profile) -> Vec<String> {
     let mut args = Vec::new();
-    if profile.full_auto.unwrap_or(false) {
-        args.push("--full-auto".to_string());
+    match &profile.full_auto {
+        Some(crate::config::ApprovalLevel::Danger) => {
+            args.push("--dangerously-bypass-approvals-and-sandbox".to_string());
+        }
+        Some(crate::config::ApprovalLevel::Never) => {
+            args.push("--ask-for-approval".to_string());
+            args.push("never".to_string());
+        }
+        Some(crate::config::ApprovalLevel::Untrusted) => {
+            args.push("--ask-for-approval".to_string());
+            args.push("untrusted".to_string());
+        }
+        None => {
+            // default: on-request — no flags
+        }
     }
     if let Some(extra) = &profile.extra_args {
         args.extend(extra.iter().cloned());
@@ -108,25 +246,124 @@ pub fn build_codex_args(profile: &Profile) -> Vec<String> {
     args
 }
 
-/// Generate codex config, inject profile env vars, set CODEX_HOME, and exec-replace with `codex`.
+// ---- backup helpers -----------------------------------------------------------
+
+const BACKUP_EXT: &str = "cct-backup";
+
+/// Copy `path` to `path.<ext>.cct-backup` (e.g. `config.toml` → `config.toml.cct-backup`).
+/// Returns the backup path if the original existed, `None` otherwise.
+fn backup_file(path: &Path) -> io::Result<Option<PathBuf>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let backup_name = match path.extension() {
+        Some(ext) => format!(
+            "{}.{}.{BACKUP_EXT}",
+            path.file_stem()
+                .unwrap_or_default()
+                .to_string_lossy(),
+            ext.to_string_lossy(),
+        ),
+        None => format!(
+            "{}.{BACKUP_EXT}",
+            path.file_name().unwrap_or_default().to_string_lossy()
+        ),
+    };
+    let backup = path.with_file_name(backup_name);
+    fs::copy(path, &backup)?;
+    Ok(Some(backup))
+}
+
+/// Restore a file from its backup, then remove the backup.
+fn restore_file(original: &Path, backup: Option<&PathBuf>) {
+    if let Some(b) = backup {
+        if b.exists() {
+            let _ = fs::rename(b, original);
+        }
+    }
+}
+
+/// Remove a backup file. No-op if `None`.
+fn remove_backup(backup: Option<&PathBuf>) {
+    if let Some(b) = backup {
+        let _ = fs::remove_file(b);
+    }
+}
+
+// ---- exec_codex ---------------------------------------------------------------
+
+/// Write provider-only config (config.toml + auth.json) into the real Codex home,
+/// inject profile env vars, and exec-replace with `codex`.
+///
+/// Only `config.toml` and `auth.json` are touched — conversation history, sessions,
+/// memories, skills, and all other Codex state in `~/.codex` are left intact.
+///
+/// Existing config files are backed up before the write.  If any step fails
+/// (write or verification), the original files are restored.
 pub fn exec_codex(profile: &Profile) -> anyhow::Error {
     if !check_codex_installed() {
         return anyhow::anyhow!(
             "codex CLI not found in PATH. Install it first: npm install -g @openai/codex"
         );
     }
-    let codex_home = dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("~/.config"))
-        .join("cc-tui")
-        .join("codex")
-        .join(&profile.name);
+
+    // Use the real Codex home so conversation history / sessions / memories
+    // are shared across profiles.  Only config.toml and auth.json are overwritten.
+    let codex_home = codex_home_dir();
+    let config_path = codex_home.join("config.toml");
+    let auth_path = codex_home.join("auth.json");
+
+    // Back up existing files before touching anything.
+    let config_backup = match backup_file(&config_path) {
+        Ok(b) => b,
+        Err(e) => return anyhow::anyhow!("failed to back up config.toml: {e}"),
+    };
+    let auth_backup = match backup_file(&auth_path) {
+        Ok(b) => b,
+        Err(e) => {
+            restore_file(&config_path, config_backup.as_ref());
+            return anyhow::anyhow!("failed to back up auth.json: {e}");
+        }
+    };
+
+    // Write + verify config.toml — roll back on any failure.
     if let Err(e) = generate_codex_config(profile, &codex_home) {
-        return anyhow::anyhow!("failed to generate codex config: {e}");
+        restore_file(&config_path, config_backup.as_ref());
+        restore_file(&auth_path, auth_backup.as_ref());
+        return anyhow::anyhow!("failed to generate codex config (original restored): {e}");
     }
+    if let Err(e) = verify_codex_config(profile, &codex_home) {
+        restore_file(&config_path, config_backup.as_ref());
+        restore_file(&auth_path, auth_backup.as_ref());
+        return anyhow::anyhow!(
+            "codex config verification failed — original config restored: {e}"
+        );
+    }
+
+    // Write + verify auth.json — roll back on any failure.
     if let Err(e) = write_codex_auth(profile, &codex_home) {
-        return anyhow::anyhow!("failed to write codex auth: {e}");
+        restore_file(&config_path, config_backup.as_ref());
+        restore_file(&auth_path, auth_backup.as_ref());
+        return anyhow::anyhow!("failed to write codex auth (original restored): {e}");
     }
-    env::set_var("CODEX_HOME", &codex_home);
+    if let Err(e) = verify_codex_auth(profile, &codex_home) {
+        restore_file(&config_path, config_backup.as_ref());
+        restore_file(&auth_path, auth_backup.as_ref());
+        return anyhow::anyhow!(
+            "codex auth verification failed — original auth restored: {e}"
+        );
+    }
+
+    // All good — discard backups.
+    remove_backup(config_backup.as_ref());
+    remove_backup(auth_backup.as_ref());
+
+    // Only set CODEX_HOME if it wasn't already in the environment —
+    // ensures Codex sees the same home we wrote to.
+    if env::var("CODEX_HOME").is_err() {
+        env::set_var("CODEX_HOME", &codex_home);
+    }
+
     if let Some(env_map) = &profile.env {
         for (k, v) in env_map {
             env::set_var(k, v);
@@ -355,7 +592,7 @@ mod tests {
         name: &str,
         model: Option<&str>,
         base_url: Option<&str>,
-        full_auto: Option<bool>,
+        full_auto: Option<crate::config::ApprovalLevel>,
         extra: Option<Vec<&str>>,
     ) -> Profile {
         Profile {
@@ -380,8 +617,11 @@ mod tests {
 
     #[test]
     fn build_codex_args_full_auto_only() {
-        let p = codex_profile("test", None, None, Some(true), None);
-        assert_eq!(build_codex_args(&p), vec!["--full-auto"]);
+        let p = codex_profile("test", None, None, Some(crate::config::ApprovalLevel::Danger), None);
+        assert_eq!(
+            build_codex_args(&p),
+            vec!["--dangerously-bypass-approvals-and-sandbox"]
+        );
     }
 
     #[test]
@@ -396,12 +636,16 @@ mod tests {
             "test",
             None,
             None,
-            Some(true),
+            Some(crate::config::ApprovalLevel::Danger),
             Some(vec!["--quiet", "--json"]),
         );
         assert_eq!(
             build_codex_args(&p),
-            vec!["--full-auto", "--quiet", "--json"]
+            vec![
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--quiet",
+                "--json"
+            ]
         );
     }
 
@@ -453,14 +697,20 @@ mod tests {
 
     #[test]
     fn build_launch_command_dispatches_codex() {
-        let p = codex_profile("test", None, None, Some(true), Some(vec!["--quiet"]));
+        let p = codex_profile("test", None, None, Some(crate::config::ApprovalLevel::Danger), Some(vec!["--quiet"]));
         let (bin, args) = build_launch_command(&p, false);
         assert_eq!(bin, "codex");
-        assert_eq!(args, vec!["--full-auto", "--quiet"]);
+        assert_eq!(
+            args,
+            vec!["--dangerously-bypass-approvals-and-sandbox", "--quiet"]
+        );
         // with_continue is ignored for codex
         let (bin2, args2) = build_launch_command(&p, true);
         assert_eq!(bin2, "codex");
-        assert_eq!(args2, vec!["--full-auto", "--quiet"]);
+        assert_eq!(
+            args2,
+            vec!["--dangerously-bypass-approvals-and-sandbox", "--quiet"]
+        );
     }
 
     #[test]
@@ -533,5 +783,220 @@ mod tests {
         let content = std::fs::read_to_string(tmp.path().join("config.toml")).unwrap();
         assert!(content.contains("model = \"gpt-4.1\""));
         assert!(content.contains("base_url = \"\""));
+    }
+
+    #[test]
+    fn generate_codex_config_with_api_key_uses_env_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut env_map = std::collections::HashMap::new();
+        env_map.insert("OPENAI_API_KEY".to_string(), "sk-test".to_string());
+        let mut p = codex_profile("with-key", Some("gpt-5"), Some("https://api.example.com/v1"), None, None);
+        p.env = Some(env_map);
+        generate_codex_config(&p, tmp.path()).unwrap();
+
+        let content = std::fs::read_to_string(tmp.path().join("config.toml")).unwrap();
+        assert!(content.contains("env_key = \"OPENAI_API_KEY\""));
+        assert!(content.contains("wire_api = \"responses\""));
+        assert!(!content.contains("requires_openai_auth"));
+    }
+
+    // --- verification tests ---
+
+    #[test]
+    fn verify_codex_config_passes_on_valid_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut env_map = std::collections::HashMap::new();
+        env_map.insert("OPENAI_API_KEY".to_string(), "sk-verify".to_string());
+        let mut p = codex_profile("verify-me", Some("gpt-4.1"), Some("https://api.example.com/v1"), None, None);
+        p.env = Some(env_map);
+        generate_codex_config(&p, tmp.path()).unwrap();
+        // Must not panic / error
+        verify_codex_config(&p, tmp.path()).expect("verification should pass on valid config");
+    }
+
+    #[test]
+    fn verify_codex_config_fails_on_wrong_model() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = codex_profile("original", Some("gpt-4.1"), Some("https://api.example.com/v1"), None, None);
+        generate_codex_config(&p, tmp.path()).unwrap();
+
+        // Verify against a profile with a DIFFERENT model
+        let wrong = codex_profile("original", Some("wrong-model"), Some("https://api.example.com/v1"), None, None);
+        let result = verify_codex_config(&wrong, tmp.path());
+        assert!(result.is_err(), "verification must fail for mismatched model");
+    }
+
+    #[test]
+    fn verify_codex_config_fails_when_env_key_missing_for_api_key_profile() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Write config WITHOUT env_key (no API key in profile)
+        let p_no_key = codex_profile("no-key", Some("gpt-4.1"), Some("https://api.example.com/v1"), None, None);
+        generate_codex_config(&p_no_key, tmp.path()).unwrap();
+
+        // Verify with a profile that HAS API key — should fail because config lacks env_key
+        let mut env_map = std::collections::HashMap::new();
+        env_map.insert("OPENAI_API_KEY".to_string(), "sk-missing".to_string());
+        let mut p_with_key = codex_profile("no-key", Some("gpt-4.1"), Some("https://api.example.com/v1"), None, None);
+        p_with_key.env = Some(env_map);
+        let result = verify_codex_config(&p_with_key, tmp.path());
+        assert!(result.is_err(), "verification must fail when env_key missing for API key profile");
+    }
+
+    #[test]
+    fn verify_codex_auth_passes_on_valid_auth() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut env_map = std::collections::HashMap::new();
+        env_map.insert("OPENAI_API_KEY".to_string(), "sk-auth-verify".to_string());
+        let mut p = codex_profile("auth-test", None, None, None, None);
+        p.env = Some(env_map);
+        write_codex_auth(&p, tmp.path()).unwrap();
+        verify_codex_auth(&p, tmp.path()).expect("auth verification should pass");
+    }
+
+    #[test]
+    fn verify_codex_auth_fails_on_key_mismatch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut env_map = std::collections::HashMap::new();
+        env_map.insert("OPENAI_API_KEY".to_string(), "sk-original".to_string());
+        let mut p = codex_profile("auth-test", None, None, None, None);
+        p.env = Some(env_map);
+        write_codex_auth(&p, tmp.path()).unwrap();
+
+        // Verify with a different key
+        let mut env_map2 = std::collections::HashMap::new();
+        env_map2.insert("OPENAI_API_KEY".to_string(), "sk-different".to_string());
+        let mut p2 = codex_profile("auth-test", None, None, None, None);
+        p2.env = Some(env_map2);
+        let result = verify_codex_auth(&p2, tmp.path());
+        assert!(result.is_err(), "verification must fail for API key mismatch");
+    }
+
+    #[test]
+    fn verify_codex_auth_skips_when_no_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = codex_profile("no-key", None, None, None, None);
+        // No auth.json written, no key in profile — should skip silently
+        verify_codex_auth(&p, tmp.path()).expect("verification should skip when no key configured");
+    }
+
+    // --- codex_home_dir tests ---
+
+    #[test]
+    fn codex_home_dir_respects_env_var() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("CODEX_HOME", tmp.path().as_os_str());
+        let home = codex_home_dir();
+        assert_eq!(home, tmp.path());
+        std::env::remove_var("CODEX_HOME");
+    }
+
+    #[test]
+    fn codex_home_dir_falls_back_to_dot_codex() {
+        // Remove CODEX_HOME to test fallback
+        std::env::remove_var("CODEX_HOME");
+        let home = codex_home_dir();
+        assert!(home.ends_with(".codex"), "fallback should end with .codex, got: {home:?}");
+    }
+
+    // --- backup / restore tests ---
+
+    #[test]
+    fn backup_file_skips_when_original_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nonexistent = tmp.path().join("does-not-exist.toml");
+        let backup = backup_file(&nonexistent).unwrap();
+        assert!(backup.is_none(), "backup of missing file should be None");
+    }
+
+    #[test]
+    fn backup_file_creates_backup_when_original_exists() {
+        let tmp = tempfile::tempdir().unwrap();
+        let original = tmp.path().join("config.toml");
+        fs::write(&original, "original content").unwrap();
+
+        let backup = backup_file(&original).unwrap();
+        assert!(backup.is_some(), "backup must exist when original exists");
+        let backup_path = backup.unwrap();
+        assert!(backup_path.exists(), "backup file must be on disk");
+        assert_ne!(backup_path, original, "backup path must differ from original");
+        assert!(
+            backup_path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .contains("cct-backup"),
+            "backup filename must contain 'cct-backup'"
+        );
+    }
+
+    #[test]
+    fn backup_file_preserves_original_content() {
+        let tmp = tempfile::tempdir().unwrap();
+        let original = tmp.path().join("auth.json");
+        fs::write(&original, r#"{"key":"original-value"}"#).unwrap();
+
+        let backup = backup_file(&original).unwrap().unwrap();
+
+        // Original untouched
+        assert_eq!(
+            fs::read_to_string(&original).unwrap(),
+            r#"{"key":"original-value"}"#
+        );
+        // Backup has same content
+        assert_eq!(
+            fs::read_to_string(&backup).unwrap(),
+            r#"{"key":"original-value"}"#
+        );
+        // Overwrite original, verify backup still has old content
+        fs::write(&original, "new content").unwrap();
+        assert_eq!(fs::read_to_string(&original).unwrap(), "new content");
+        assert_eq!(
+            fs::read_to_string(&backup).unwrap(),
+            r#"{"key":"original-value"}"#
+        );
+    }
+
+    #[test]
+    fn restore_file_puts_backup_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let original = tmp.path().join("config.toml");
+        fs::write(&original, "original").unwrap();
+        let backup = backup_file(&original).unwrap().unwrap();
+
+        // Overwrite original
+        fs::write(&original, "overwritten").unwrap();
+        assert_eq!(fs::read_to_string(&original).unwrap(), "overwritten");
+
+        // Restore
+        restore_file(&original, Some(&backup));
+        assert_eq!(fs::read_to_string(&original).unwrap(), "original");
+        assert!(!backup.exists(), "backup file must be removed after restore");
+    }
+
+    #[test]
+    fn restore_file_noop_when_backup_is_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let original = tmp.path().join("config.toml");
+        fs::write(&original, "keep me").unwrap();
+        restore_file(&original, None);
+        assert_eq!(fs::read_to_string(&original).unwrap(), "keep me");
+    }
+
+    #[test]
+    fn remove_backup_cleans_up() {
+        let tmp = tempfile::tempdir().unwrap();
+        let original = tmp.path().join("config.toml");
+        fs::write(&original, "data").unwrap();
+        let backup = backup_file(&original).unwrap().unwrap();
+        assert!(backup.exists());
+
+        remove_backup(Some(&backup));
+        assert!(!backup.exists());
+    }
+
+    #[test]
+    fn remove_backup_noop_when_none() {
+        // Must not panic
+        remove_backup(None);
     }
 }

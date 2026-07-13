@@ -15,7 +15,7 @@ pub fn field_labels(backend: &Backend) -> [&'static str; 6] {
             "Base URL",
             "API Key",
             "Model",
-            "Full Auto (y/n)",
+            "Approval",
             "",
         ],
     }
@@ -104,16 +104,18 @@ impl FormState {
             }
             Backend::Codex => {
                 let env = profile.env.as_ref();
+                let full_auto = profile.full_auto.as_ref();
                 form.fields = [
                     profile.name.clone(),
                     profile.base_url.clone().unwrap_or_default(),
                     env.and_then(|map| map.get("OPENAI_API_KEY").cloned())
                         .unwrap_or_default(),
                     profile.model.clone().unwrap_or_default(),
-                    if profile.full_auto.unwrap_or(false) {
-                        "y".into()
-                    } else {
-                        "n".into()
+                    match full_auto {
+                        Some(crate::config::ApprovalLevel::Danger) => "danger".into(),
+                        Some(crate::config::ApprovalLevel::Never) => "never".into(),
+                        Some(crate::config::ApprovalLevel::Untrusted) => "untrusted".into(),
+                        None => String::new(),
                     },
                     String::new(),
                 ];
@@ -171,7 +173,13 @@ impl FormState {
                 let api_key = self.fields[2].trim().to_string();
                 let model = self.fields[3].trim().to_string();
                 let full_auto_str = self.fields[4].trim().to_lowercase();
-                let full_auto = matches!(full_auto_str.as_str(), "y" | "yes");
+                let full_auto = match full_auto_str.as_str() {
+                    "danger" => Some(crate::config::ApprovalLevel::Danger),
+                    "never" => Some(crate::config::ApprovalLevel::Never),
+                    "untrusted" => Some(crate::config::ApprovalLevel::Untrusted),
+                    "y" | "yes" => Some(crate::config::ApprovalLevel::Danger), // backward compat
+                    _ => None,
+                };
                 NewProfile {
                     name,
                     description: None,
@@ -188,7 +196,7 @@ impl FormState {
                     model: if model.is_empty() { None } else { Some(model) },
                     fast_model: None,
                     backend: Backend::Codex,
-                    full_auto: Some(full_auto),
+                    full_auto,
                     auth_type: None,
                 }
             }
@@ -426,7 +434,7 @@ mod tests {
                 "Base URL",
                 "API Key",
                 "Model",
-                "Full Auto (y/n)",
+                "Approval",
                 ""
             ]
         );
@@ -565,7 +573,7 @@ mod tests {
             model: Some("gpt-5.4".into()),
             backend: Backend::Codex,
             base_url: Some("https://api.openai.com/v1".into()),
-            full_auto: Some(true),
+            full_auto: Some(crate::config::ApprovalLevel::Danger),
             auth_type: None,
         };
 
@@ -581,7 +589,7 @@ mod tests {
                 "https://api.openai.com/v1".to_string(),
                 "sk-openai-123".to_string(),
                 "gpt-5.4".to_string(),
-                "y".to_string(),
+                "danger".to_string(),
                 String::new(),
             ]
         );
@@ -598,7 +606,7 @@ mod tests {
         form.fields[1] = "https://api.openai.com".into(); // labels[1] = "Base URL"
         form.fields[2] = "sk-openai-key".into(); // labels[2] = "API Key"
         form.fields[3] = "gpt-4.1".into(); // labels[3] = "Model"
-        form.fields[4] = "y".into(); // labels[4] = "Full Auto (y/n)"
+        form.fields[4] = "y".into(); // labels[4] = "Approval"
 
         let np = form.to_new_profile();
 
@@ -614,8 +622,8 @@ mod tests {
         assert!(labels[3].contains("Model"));
         assert_eq!(np.model.as_deref(), Some("gpt-4.1"));
 
-        assert!(labels[4].contains("Full Auto"));
-        assert_eq!(np.full_auto, Some(true));
+        assert!(labels[4].contains("Approval"));
+        assert_eq!(np.full_auto, Some(crate::config::ApprovalLevel::Danger));
 
         assert_eq!(np.backend, Backend::Codex);
         assert!(np.description.is_none());

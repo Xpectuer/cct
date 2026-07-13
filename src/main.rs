@@ -270,11 +270,12 @@ fn run_tui() -> Result<()> {
                                 }
                             }
                             config::Backend::Codex => {
-                                let old_val = profile.full_auto.unwrap_or(false);
-                                let new_val = !old_val;
-                                match config::toggle_full_auto(&profile.name, new_val) {
+                                let next =
+                                    config::ApprovalLevel::next(&profile.full_auto);
+                                let next_str = next.as_ref().map(|a| a.as_str());
+                                match config::toggle_full_auto(&profile.name, next_str) {
                                     Ok(()) => {
-                                        profile.full_auto = Some(new_val);
+                                        profile.full_auto = next;
                                     }
                                     Err(e) => {
                                         eprintln!("Warning: toggle failed: {e:#}");
