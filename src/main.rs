@@ -270,8 +270,7 @@ fn run_tui() -> Result<()> {
                                 }
                             }
                             config::Backend::Codex => {
-                                let next =
-                                    config::ApprovalLevel::next(&profile.full_auto);
+                                let next = config::ApprovalLevel::next(&profile.full_auto);
                                 let next_str = next.as_ref().map(|a| a.as_str());
                                 match config::toggle_full_auto(&profile.name, next_str) {
                                     Ok(()) => {

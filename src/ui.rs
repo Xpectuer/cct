@@ -223,7 +223,10 @@ fn build_detail(profile: &Profile) -> Vec<Line<'static>> {
             }
         }
         Backend::Codex => {
-            lines.push(Line::from(format!("approval: {}", crate::config::approval_label(&profile.full_auto))));
+            lines.push(Line::from(format!(
+                "approval: {}",
+                crate::config::approval_label(&profile.full_auto)
+            )));
         }
     }
     if let Some(extra) = &profile.extra_args {

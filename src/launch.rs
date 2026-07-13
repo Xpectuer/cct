@@ -187,10 +187,7 @@ fn verify_codex_config(profile: &Profile, codex_home: &Path) -> Result<()> {
 /// Verify that the written auth.json is valid and contains the expected API key.
 /// Skips verification if no API key is configured (file won't exist).
 fn verify_codex_auth(profile: &Profile, codex_home: &Path) -> Result<()> {
-    let expected_key = profile
-        .env
-        .as_ref()
-        .and_then(|m| m.get("OPENAI_API_KEY"));
+    let expected_key = profile.env.as_ref().and_then(|m| m.get("OPENAI_API_KEY"));
 
     let auth_path = codex_home.join("auth.json");
 
@@ -259,9 +256,7 @@ fn backup_file(path: &Path) -> io::Result<Option<PathBuf>> {
     let backup_name = match path.extension() {
         Some(ext) => format!(
             "{}.{}.{BACKUP_EXT}",
-            path.file_stem()
-                .unwrap_or_default()
-                .to_string_lossy(),
+            path.file_stem().unwrap_or_default().to_string_lossy(),
             ext.to_string_lossy(),
         ),
         None => format!(
@@ -335,9 +330,7 @@ pub fn exec_codex(profile: &Profile) -> anyhow::Error {
     if let Err(e) = verify_codex_config(profile, &codex_home) {
         restore_file(&config_path, config_backup.as_ref());
         restore_file(&auth_path, auth_backup.as_ref());
-        return anyhow::anyhow!(
-            "codex config verification failed — original config restored: {e}"
-        );
+        return anyhow::anyhow!("codex config verification failed — original config restored: {e}");
     }
 
     // Write + verify auth.json — roll back on any failure.
@@ -349,9 +342,7 @@ pub fn exec_codex(profile: &Profile) -> anyhow::Error {
     if let Err(e) = verify_codex_auth(profile, &codex_home) {
         restore_file(&config_path, config_backup.as_ref());
         restore_file(&auth_path, auth_backup.as_ref());
-        return anyhow::anyhow!(
-            "codex auth verification failed — original auth restored: {e}"
-        );
+        return anyhow::anyhow!("codex auth verification failed — original auth restored: {e}");
     }
 
     // All good — discard backups.
@@ -617,7 +608,13 @@ mod tests {
 
     #[test]
     fn build_codex_args_full_auto_only() {
-        let p = codex_profile("test", None, None, Some(crate::config::ApprovalLevel::Danger), None);
+        let p = codex_profile(
+            "test",
+            None,
+            None,
+            Some(crate::config::ApprovalLevel::Danger),
+            None,
+        );
         assert_eq!(
             build_codex_args(&p),
             vec!["--dangerously-bypass-approvals-and-sandbox"]
@@ -697,7 +694,13 @@ mod tests {
 
     #[test]
     fn build_launch_command_dispatches_codex() {
-        let p = codex_profile("test", None, None, Some(crate::config::ApprovalLevel::Danger), Some(vec!["--quiet"]));
+        let p = codex_profile(
+            "test",
+            None,
+            None,
+            Some(crate::config::ApprovalLevel::Danger),
+            Some(vec!["--quiet"]),
+        );
         let (bin, args) = build_launch_command(&p, false);
         assert_eq!(bin, "codex");
         assert_eq!(
@@ -790,7 +793,13 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let mut env_map = std::collections::HashMap::new();
         env_map.insert("OPENAI_API_KEY".to_string(), "sk-test".to_string());
-        let mut p = codex_profile("with-key", Some("gpt-5"), Some("https://api.example.com/v1"), None, None);
+        let mut p = codex_profile(
+            "with-key",
+            Some("gpt-5"),
+            Some("https://api.example.com/v1"),
+            None,
+            None,
+        );
         p.env = Some(env_map);
         generate_codex_config(&p, tmp.path()).unwrap();
 
@@ -807,7 +816,13 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let mut env_map = std::collections::HashMap::new();
         env_map.insert("OPENAI_API_KEY".to_string(), "sk-verify".to_string());
-        let mut p = codex_profile("verify-me", Some("gpt-4.1"), Some("https://api.example.com/v1"), None, None);
+        let mut p = codex_profile(
+            "verify-me",
+            Some("gpt-4.1"),
+            Some("https://api.example.com/v1"),
+            None,
+            None,
+        );
         p.env = Some(env_map);
         generate_codex_config(&p, tmp.path()).unwrap();
         // Must not panic / error
@@ -817,29 +832,59 @@ mod tests {
     #[test]
     fn verify_codex_config_fails_on_wrong_model() {
         let tmp = tempfile::tempdir().unwrap();
-        let p = codex_profile("original", Some("gpt-4.1"), Some("https://api.example.com/v1"), None, None);
+        let p = codex_profile(
+            "original",
+            Some("gpt-4.1"),
+            Some("https://api.example.com/v1"),
+            None,
+            None,
+        );
         generate_codex_config(&p, tmp.path()).unwrap();
 
         // Verify against a profile with a DIFFERENT model
-        let wrong = codex_profile("original", Some("wrong-model"), Some("https://api.example.com/v1"), None, None);
+        let wrong = codex_profile(
+            "original",
+            Some("wrong-model"),
+            Some("https://api.example.com/v1"),
+            None,
+            None,
+        );
         let result = verify_codex_config(&wrong, tmp.path());
-        assert!(result.is_err(), "verification must fail for mismatched model");
+        assert!(
+            result.is_err(),
+            "verification must fail for mismatched model"
+        );
     }
 
     #[test]
     fn verify_codex_config_fails_when_env_key_missing_for_api_key_profile() {
         let tmp = tempfile::tempdir().unwrap();
         // Write config WITHOUT env_key (no API key in profile)
-        let p_no_key = codex_profile("no-key", Some("gpt-4.1"), Some("https://api.example.com/v1"), None, None);
+        let p_no_key = codex_profile(
+            "no-key",
+            Some("gpt-4.1"),
+            Some("https://api.example.com/v1"),
+            None,
+            None,
+        );
         generate_codex_config(&p_no_key, tmp.path()).unwrap();
 
         // Verify with a profile that HAS API key — should fail because config lacks env_key
         let mut env_map = std::collections::HashMap::new();
         env_map.insert("OPENAI_API_KEY".to_string(), "sk-missing".to_string());
-        let mut p_with_key = codex_profile("no-key", Some("gpt-4.1"), Some("https://api.example.com/v1"), None, None);
+        let mut p_with_key = codex_profile(
+            "no-key",
+            Some("gpt-4.1"),
+            Some("https://api.example.com/v1"),
+            None,
+            None,
+        );
         p_with_key.env = Some(env_map);
         let result = verify_codex_config(&p_with_key, tmp.path());
-        assert!(result.is_err(), "verification must fail when env_key missing for API key profile");
+        assert!(
+            result.is_err(),
+            "verification must fail when env_key missing for API key profile"
+        );
     }
 
     #[test]
@@ -868,7 +913,10 @@ mod tests {
         let mut p2 = codex_profile("auth-test", None, None, None, None);
         p2.env = Some(env_map2);
         let result = verify_codex_auth(&p2, tmp.path());
-        assert!(result.is_err(), "verification must fail for API key mismatch");
+        assert!(
+            result.is_err(),
+            "verification must fail for API key mismatch"
+        );
     }
 
     #[test]
@@ -895,7 +943,10 @@ mod tests {
         // Remove CODEX_HOME to test fallback
         std::env::remove_var("CODEX_HOME");
         let home = codex_home_dir();
-        assert!(home.ends_with(".codex"), "fallback should end with .codex, got: {home:?}");
+        assert!(
+            home.ends_with(".codex"),
+            "fallback should end with .codex, got: {home:?}"
+        );
     }
 
     // --- backup / restore tests ---
@@ -918,7 +969,10 @@ mod tests {
         assert!(backup.is_some(), "backup must exist when original exists");
         let backup_path = backup.unwrap();
         assert!(backup_path.exists(), "backup file must be on disk");
-        assert_ne!(backup_path, original, "backup path must differ from original");
+        assert_ne!(
+            backup_path, original,
+            "backup path must differ from original"
+        );
         assert!(
             backup_path
                 .file_name()
@@ -970,7 +1024,10 @@ mod tests {
         // Restore
         restore_file(&original, Some(&backup));
         assert_eq!(fs::read_to_string(&original).unwrap(), "original");
-        assert!(!backup.exists(), "backup file must be removed after restore");
+        assert!(
+            !backup.exists(),
+            "backup file must be removed after restore"
+        );
     }
 
     #[test]

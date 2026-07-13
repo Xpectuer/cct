@@ -54,7 +54,11 @@ where
     match raw {
         None => Ok(None),
         Some(toml::Value::Boolean(b)) => {
-            if b { Ok(Some(ApprovalLevel::Danger)) } else { Ok(None) }
+            if b {
+                Ok(Some(ApprovalLevel::Danger))
+            } else {
+                Ok(None)
+            }
         }
         Some(toml::Value::String(s)) => match s.as_str() {
             "danger" => Ok(Some(ApprovalLevel::Danger)),
@@ -314,7 +318,11 @@ pub fn update_profile(original_name: &str, updated: &NewProfile) -> Result<()> {
         Backend::Codex => {
             entry["backend"] = value("codex");
             entry.remove("description");
-            set_optional_string(entry, "full_auto", updated.full_auto.as_ref().map(|a| a.as_str()));
+            set_optional_string(
+                entry,
+                "full_auto",
+                updated.full_auto.as_ref().map(|a| a.as_str()),
+            );
 
             let env = ensure_env_table(entry);
             set_optional_string(env, "OPENAI_API_KEY", non_empty(&updated.api_key));

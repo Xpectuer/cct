@@ -10,14 +10,7 @@ pub fn field_labels(backend: &Backend) -> [&'static str; 6] {
             "Pro Model",
             "Fast Model",
         ],
-        Backend::Codex => [
-            "Name *",
-            "Base URL",
-            "API Key",
-            "Model",
-            "Approval",
-            "",
-        ],
+        Backend::Codex => ["Name *", "Base URL", "API Key", "Model", "Approval", ""],
     }
 }
 
@@ -429,14 +422,7 @@ mod tests {
         let codex_labels = field_labels(&Backend::Codex);
         assert_eq!(
             codex_labels,
-            [
-                "Name *",
-                "Base URL",
-                "API Key",
-                "Model",
-                "Approval",
-                ""
-            ]
+            ["Name *", "Base URL", "API Key", "Model", "Approval", ""]
         );
     }
 
