@@ -128,6 +128,14 @@ description = "Default Claude Code"
 
 # [profiles.env]
 # ANTHROPIC_API_KEY = "sk-ant-..."
+
+[[profiles]]
+name = "default-codex"
+description = "Default Codex"
+backend = "codex"
+
+# [profiles.env]
+# OPENAI_API_KEY = "sk-..."
 "#;
 
 pub fn ensure_default_config() -> Result<()> {
@@ -138,6 +146,27 @@ pub fn ensure_default_config() -> Result<()> {
         }
         fs::write(&path, DEFAULT_CONFIG)
             .with_context(|| format!("write default config to {path:?}"))?;
+    }
+    Ok(())
+}
+
+/// Ensure at least one Codex profile exists. If no Codex profiles are found,
+/// appends a `default-codex` profile to the config file.
+pub fn ensure_codex_profile() -> Result<()> {
+    let profiles = load_profiles()?;
+    let has_codex = profiles.iter().any(|p| p.backend == Backend::Codex);
+    if !has_codex {
+        append_profile(&NewProfile {
+            name: "default-codex".into(),
+            description: Some("Default Codex".into()),
+            base_url: None,
+            api_key: None,
+            model: None,
+            fast_model: None,
+            backend: Backend::Codex,
+            full_auto: None,
+            auth_type: None,
+        })?;
     }
     Ok(())
 }
@@ -153,6 +182,12 @@ pub fn validate_profiles(profiles: &[Profile]) -> Result<()> {
         if p.backend == Backend::Claude && p.full_auto.is_some() {
             anyhow::bail!(
                 "Profile {:?}: claude backend does not support full_auto",
+                p.name
+            );
+        }
+        if p.backend == Backend::Claude && p.auth_type.as_deref() == Some("subscription") {
+            anyhow::bail!(
+                "Profile {:?}: claude backend does not support auth_type = \"subscription\"",
                 p.name
             );
         }
@@ -323,6 +358,11 @@ pub fn update_profile(original_name: &str, updated: &NewProfile) -> Result<()> {
                 "full_auto",
                 updated.full_auto.as_ref().map(|a| a.as_str()),
             );
+            if updated.auth_type.as_deref() == Some("subscription") {
+                entry["auth_type"] = value("subscription");
+            } else {
+                entry.remove("auth_type");
+            }
 
             let env = ensure_env_table(entry);
             set_optional_string(env, "OPENAI_API_KEY", non_empty(&updated.api_key));
@@ -359,8 +399,14 @@ pub fn append_profile(profile: &NewProfile) -> Result<()> {
     if let Some(full_auto) = &profile.full_auto {
         block.push_str(&format!("full_auto = {:?}\n", full_auto.as_str()));
     }
-    if profile.auth_type.as_deref() == Some("token") {
-        block.push_str("auth_type = \"token\"\n");
+    match profile.auth_type.as_deref() {
+        Some("token") if profile.backend == Backend::Claude => {
+            block.push_str("auth_type = \"token\"\n");
+        }
+        Some("subscription") if profile.backend == Backend::Codex => {
+            block.push_str("auth_type = \"subscription\"\n");
+        }
+        _ => {}
     }
 
     match profile.backend {
@@ -490,6 +536,37 @@ pub fn toggle_auth_type(profile_name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Toggle `auth_type` for a named Codex profile between API key mode (None)
+/// and subscription mode (Some("subscription")). Uses toml_edit for surgical edits.
+pub fn toggle_codex_auth_type(profile_name: &str) -> Result<()> {
+    let path = config_path();
+    let content = fs::read_to_string(&path).with_context(|| format!("read config {path:?}"))?;
+    let mut doc = content
+        .parse::<toml_edit::DocumentMut>()
+        .with_context(|| format!("parse TOML in {path:?}"))?;
+
+    let profiles = doc
+        .get_mut("profiles")
+        .and_then(|v| v.as_array_of_tables_mut())
+        .with_context(|| "no [[profiles]] array in config")?;
+
+    let entry = profiles
+        .iter_mut()
+        .find(|t| t.get("name").and_then(|v| v.as_str()) == Some(profile_name))
+        .with_context(|| format!("profile {profile_name:?} not found in config"))?;
+
+    let is_subscription = entry.get("auth_type").and_then(|v| v.as_str()) == Some("subscription");
+
+    if is_subscription {
+        entry.remove("auth_type");
+    } else {
+        entry["auth_type"] = value("subscription");
+    }
+
+    fs::write(&path, doc.to_string()).with_context(|| format!("write config {path:?}"))?;
+    Ok(())
+}
+
 /// Set `full_auto` approval level for a named Codex profile in the config file.
 /// `new_value` is the string form (`"untrusted"`, `"never"`, `"danger"`) or `None` to remove.
 /// Uses toml_edit for surgical edits that preserve comments and formatting.
@@ -587,7 +664,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
         append_profile(&new).unwrap();
         let profiles = load_profiles().unwrap();
         assert!(profiles.iter().any(|p| p.name == "test-profile"));
-        assert_eq!(profiles.len(), 2); // default + new
+        assert_eq!(profiles.len(), 3); // default + default-codex + new
 
         std::env::remove_var("CCT_CONFIG");
     }
@@ -1543,6 +1620,124 @@ description = "Second profile"
         assert!(
             content.contains("auth_type = \"token\""),
             "should have auth_type, got:\n{content}"
+        );
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    // --- toggle_codex_auth_type tests ---
+
+    #[test]
+    #[serial]
+    fn toggle_codex_auth_type_insert() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(
+            &path,
+            "# comment\n[[profiles]]\nname = \"codex-test\"\nbackend = \"codex\"\n",
+        )
+        .unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        toggle_codex_auth_type("codex-test").unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            content.contains("auth_type = \"subscription\""),
+            "should have auth_type after insert, got:\n{content}"
+        );
+        assert!(content.contains("# comment"), "comment should be preserved");
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn toggle_codex_auth_type_remove() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(
+            &path,
+            "[[profiles]]\nname = \"codex-test\"\nbackend = \"codex\"\nauth_type = \"subscription\"\n",
+        )
+        .unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        toggle_codex_auth_type("codex-test").unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !content.contains("auth_type"),
+            "should not have auth_type after toggle back, got:\n{content}"
+        );
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn toggle_codex_auth_type_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, "[[profiles]]\nname = \"other\"\n").unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let result = toggle_codex_auth_type("missing");
+        assert!(result.is_err());
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    fn validate_codex_auth_type_subscription_on_claude_rejected() {
+        let profiles = vec![Profile {
+            name: "bad-claude".into(),
+            description: None,
+            env: None,
+            extra_args: None,
+            skip_permissions: None,
+            model: None,
+            backend: Backend::Claude,
+            base_url: None,
+            full_auto: None,
+            auth_type: Some("subscription".into()),
+        }];
+        let result = validate_profiles(&profiles);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("subscription"),
+            "Error should mention subscription, got: {msg}"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn append_codex_profile_with_subscription_auth() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, DEFAULT_CONFIG).unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let new = NewProfile {
+            name: "codex-sub".into(),
+            description: None,
+            base_url: None,
+            api_key: None,
+            model: Some("gpt-5-codex".into()),
+            fast_model: None,
+            backend: Backend::Codex,
+            full_auto: None,
+            auth_type: Some("subscription".into()),
+        };
+        append_profile(&new).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let block_start = content.find("name = \"codex-sub\"").unwrap();
+        let block = &content[block_start..];
+        assert!(
+            block.contains("auth_type = \"subscription\""),
+            "should contain auth_type, got:\n{block}"
         );
 
         std::env::remove_var("CCT_CONFIG");

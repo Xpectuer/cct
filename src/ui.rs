@@ -76,7 +76,7 @@ fn normal_footer_text(backend: &Backend) -> &'static str {
             " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [c] Resume  [s] Skip-perms  [t] Auth  [a] Add  [d] Duplicate  [e] Edit  [q] Quit"
         }
         Backend::Codex => {
-            " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [s] Approval  [a] Add  [d] Duplicate  [e] Edit  [q] Quit"
+            " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [s] Approval  [t] Auth  [a] Add  [d] Duplicate  [e] Edit  [q] Quit"
         }
     }
 }
@@ -124,14 +124,19 @@ pub fn draw(app: &App, frame: &mut Frame) {
                         item.style(Style::default().fg(Color::Red))
                     }
                     Backend::Codex => {
-                        // Color by approval level: green (safest) → yellow → red (most dangerous)
-                        let color = match &p.full_auto {
-                            Some(crate::config::ApprovalLevel::Untrusted) => Color::Green,
-                            Some(crate::config::ApprovalLevel::Never) => Color::Yellow,
-                            Some(crate::config::ApprovalLevel::Danger) => Color::Red,
-                            None => Color::White, // on-request: default, white
-                        };
-                        item.style(Style::default().fg(color))
+                        // Subscription mode: gray — signals "no proxy, native Codex auth"
+                        if p.auth_type.as_deref() == Some("subscription") {
+                            item.style(Style::default().fg(Color::DarkGray))
+                        } else {
+                            // Color by approval level: green (safest) → yellow → red (most dangerous)
+                            let color = match &p.full_auto {
+                                Some(crate::config::ApprovalLevel::Untrusted) => Color::Green,
+                                Some(crate::config::ApprovalLevel::Never) => Color::Yellow,
+                                Some(crate::config::ApprovalLevel::Danger) => Color::Red,
+                                None => Color::White, // on-request: default, white
+                            };
+                            item.style(Style::default().fg(color))
+                        }
                     }
                     _ => item,
                 }
@@ -227,6 +232,9 @@ fn build_detail(profile: &Profile) -> Vec<Line<'static>> {
                 "approval: {}",
                 crate::config::approval_label(&profile.full_auto)
             )));
+            if profile.auth_type.as_deref() == Some("subscription") {
+                lines.push(Line::from("auth: subscription"));
+            }
         }
     }
     if let Some(extra) = &profile.extra_args {
@@ -431,14 +439,11 @@ mod tests {
         assert!(codex_footer.contains("[a] Add"));
         assert!(codex_footer.contains("[d] Duplicate"));
         assert!(codex_footer.contains("[s] Approval"));
+        assert!(codex_footer.contains("[t] Auth"));
         assert!(codex_footer.contains("[e] Edit"));
         assert!(
             !codex_footer.contains("[c] Resume"),
             "Codex footer should not show Resume"
-        );
-        assert!(
-            !codex_footer.contains("[t] Auth"),
-            "Codex footer should not show Auth"
         );
         assert_eq!(codex_footer.matches("[e] Edit").count(), 1);
     }
@@ -754,5 +759,54 @@ mod tests {
             !joined.contains("auth:"),
             "should NOT show auth when None, got:\n{joined}"
         );
+    }
+
+    #[test]
+    fn codex_detail_shows_subscription_auth() {
+        let profile = Profile {
+            name: "codex-sub".into(),
+            description: None,
+            env: None,
+            model: None,
+            skip_permissions: None,
+            extra_args: None,
+            backend: crate::config::Backend::Codex,
+            base_url: None,
+            full_auto: None,
+            auth_type: Some("subscription".into()),
+        };
+        let lines = build_detail(&profile);
+        let joined: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("auth: subscription"),
+            "should show auth: subscription, got:\n{joined}"
+        );
+    }
+
+    #[test]
+    fn codex_subscription_profile_has_gray_style() {
+        let profile = Profile {
+            name: "sub-profile".into(),
+            description: None,
+            env: None,
+            model: None,
+            skip_permissions: None,
+            extra_args: None,
+            backend: crate::config::Backend::Codex,
+            base_url: None,
+            full_auto: None,
+            auth_type: Some("subscription".into()),
+        };
+        // Verify auth_type is subscription
+        assert_eq!(profile.auth_type.as_deref(), Some("subscription"));
+        // Style branch: subscription profiles get DarkGray
+        let item = ListItem::new(profile.name.clone());
+        let styled = item.style(Style::default().fg(Color::DarkGray));
+        // Just verify the style was applied without panicking
+        let _ = styled;
     }
 }

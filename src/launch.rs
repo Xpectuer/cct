@@ -137,6 +137,23 @@ pub fn ensure_proxy_running(_port: u16, socket_path: &Path) -> Result<()> {
 
 /// Build the CLI argument list for `codex` from a profile. Pure — no side effects.
 pub fn build_codex_args(profile: &Profile) -> Vec<String> {
+    build_shared_codex_args(profile)
+}
+
+/// Build args for subscription mode — passes `--config model_provider=openai`
+/// to use Codex's built-in OpenAI provider with native OAuth authentication.
+fn build_codex_subscription_args(profile: &Profile) -> Vec<String> {
+    let mut args = vec!["--config".to_string(), "model_provider=openai".to_string()];
+    if let Some(model) = &profile.model {
+        args.push("--config".to_string());
+        args.push(format!("model={model}"));
+    }
+    args.append(&mut build_shared_codex_args(profile));
+    args
+}
+
+/// Approval + extra_args common to both proxy and subscription paths.
+fn build_shared_codex_args(profile: &Profile) -> Vec<String> {
     let mut args = Vec::new();
     match &profile.full_auto {
         Some(crate::config::ApprovalLevel::Danger) => {
@@ -158,19 +175,13 @@ pub fn build_codex_args(profile: &Profile) -> Vec<String> {
     args
 }
 
-/// Launch Codex through the local proxy.
+/// Launch Codex through the local proxy (API key mode).
 ///
 /// 1. Ensure proxy is running (spawn if needed).
 /// 2. Switch proxy to this profile's upstream.
 /// 3. Write per-profile config.toml pointing to the proxy (first launch only).
-/// 4. Set env vars and exec-replace with `codex`.
-pub fn exec_codex(profile: &Profile) -> anyhow::Error {
-    if !check_codex_installed() {
-        return anyhow::anyhow!(
-            "codex CLI not found in PATH. Install it first: npm install -g @openai/codex"
-        );
-    }
-
+/// 4. Set CODEX_HOME and env vars, exec-replace with `codex`.
+fn exec_codex_proxy(profile: &Profile) -> anyhow::Error {
     let port: u16 = crate::proxy::proxy_port();
     let socket_path = crate::proxy::proxy_socket_path();
 
@@ -208,6 +219,37 @@ pub fn exec_codex(profile: &Profile) -> anyhow::Error {
     let args = build_codex_args(profile);
     let err = Command::new("codex").args(&args).exec();
     anyhow::anyhow!("exec codex: {err}")
+}
+
+/// Launch Codex with subscription (OAuth) authentication.
+///
+/// No proxy, no per-profile CODEX_HOME — uses default `~/.codex` so the
+/// login session, memory DB, and other state from `codex login` are preserved.
+/// Passes `--config model_provider=openai` to use the built-in OpenAI provider.
+fn exec_codex_subscription(profile: &Profile) -> anyhow::Error {
+    env::set_var("DISABLE_AUTOUPDATER", "1");
+    if let Some(env_map) = &profile.env {
+        for (k, v) in env_map {
+            env::set_var(k, v);
+        }
+    }
+    let args = build_codex_subscription_args(profile);
+    let err = Command::new("codex").args(&args).exec();
+    anyhow::anyhow!("exec codex: {err}")
+}
+
+/// Launch Codex. Dispatches to proxy mode (API key) or subscription mode (OAuth).
+pub fn exec_codex(profile: &Profile) -> anyhow::Error {
+    if !check_codex_installed() {
+        return anyhow::anyhow!(
+            "codex CLI not found in PATH. Install it first: npm install -g @openai/codex"
+        );
+    }
+
+    if profile.auth_type.as_deref() == Some("subscription") {
+        return exec_codex_subscription(profile);
+    }
+    exec_codex_proxy(profile)
 }
 
 /// Check if `claude` (or override via CCT_CLAUDE_BIN) is available in PATH.
@@ -487,6 +529,50 @@ mod tests {
                 "--dangerously-bypass-approvals-and-sandbox",
                 "--quiet",
                 "--json"
+            ]
+        );
+    }
+
+    // --- build_codex_subscription_args tests ---
+
+    #[test]
+    fn build_codex_subscription_args_empty() {
+        let p = codex_profile("test", None, None, None, None);
+        assert_eq!(
+            build_codex_subscription_args(&p),
+            vec!["--config", "model_provider=openai"]
+        );
+    }
+
+    #[test]
+    fn build_codex_subscription_args_with_model() {
+        let p = codex_profile("test", Some("gpt-5-codex"), None, None, None);
+        assert_eq!(
+            build_codex_subscription_args(&p),
+            vec![
+                "--config",
+                "model_provider=openai",
+                "--config",
+                "model=gpt-5-codex",
+            ]
+        );
+    }
+
+    #[test]
+    fn build_codex_subscription_args_with_full_auto() {
+        let p = codex_profile(
+            "test",
+            None,
+            None,
+            Some(crate::config::ApprovalLevel::Danger),
+            None,
+        );
+        assert_eq!(
+            build_codex_subscription_args(&p),
+            vec![
+                "--config",
+                "model_provider=openai",
+                "--dangerously-bypass-approvals-and-sandbox",
             ]
         );
     }

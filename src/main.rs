@@ -49,6 +49,8 @@ enum Commands {
 
 fn main() -> Result<()> {
     config::ensure_default_config()?;
+    // Ignore errors — non-fatal if the codex profile can't be ensured
+    let _ = config::ensure_codex_profile();
 
     // Ignore errors — failing to set onboarding is non-fatal
     let _ = launch::ensure_claude_onboarding();
@@ -295,25 +297,47 @@ fn run_tui() -> Result<()> {
                     }
                     (KeyCode::Char('t'), _) if !app.profiles.is_empty() => {
                         let profile = &app.profiles[app.selected];
-                        if profile.backend == config::Backend::Claude {
-                            match config::toggle_auth_type(&profile.name) {
-                                Ok(()) => match config::load_profiles() {
-                                    Ok(updated) => {
-                                        if let Some(up) = updated
-                                            .into_iter()
-                                            .find(|p| p.name.eq_ignore_ascii_case(&profile.name))
-                                        {
-                                            app.profiles[app.selected] = up;
+                        match profile.backend {
+                            config::Backend::Claude => {
+                                match config::toggle_auth_type(&profile.name) {
+                                    Ok(()) => match config::load_profiles() {
+                                        Ok(updated) => {
+                                            if let Some(up) = updated.into_iter().find(|p| {
+                                                p.name.eq_ignore_ascii_case(&profile.name)
+                                            }) {
+                                                app.profiles[app.selected] = up;
+                                            }
                                         }
-                                    }
+                                        Err(e) => {
+                                            eprintln!(
+                                                "Warning: reload after auth toggle failed: {e:#}"
+                                            );
+                                        }
+                                    },
                                     Err(e) => {
-                                        eprintln!(
-                                            "Warning: reload after auth toggle failed: {e:#}"
-                                        );
+                                        eprintln!("Warning: auth toggle failed: {e:#}");
                                     }
-                                },
-                                Err(e) => {
-                                    eprintln!("Warning: auth toggle failed: {e:#}");
+                                }
+                            }
+                            config::Backend::Codex => {
+                                match config::toggle_codex_auth_type(&profile.name) {
+                                    Ok(()) => match config::load_profiles() {
+                                        Ok(updated) => {
+                                            if let Some(up) = updated.into_iter().find(|p| {
+                                                p.name.eq_ignore_ascii_case(&profile.name)
+                                            }) {
+                                                app.profiles[app.selected] = up;
+                                            }
+                                        }
+                                        Err(e) => {
+                                            eprintln!(
+                                                "Warning: reload after codex auth toggle failed: {e:#}"
+                                            );
+                                        }
+                                    },
+                                    Err(e) => {
+                                        eprintln!("Warning: codex auth toggle failed: {e:#}");
+                                    }
                                 }
                             }
                         }
