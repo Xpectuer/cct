@@ -1,13 +1,13 @@
 {
+  "env": {
+    "RUST_LOG": "debug",
+    "RUST_BACKTRACE": "1"
+  },
   "permissions": {
     "allow": [
       "Bash(cargo:*)",
       "Bash(bats:*)"
     ]
-  },
-  "env": {
-    "RUST_LOG": "debug",
-    "RUST_BACKTRACE": "1"
   },
   "hooks": {
     "PostToolUse": [
@@ -31,5 +31,8 @@
         ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "meta@alex-marketplace": true
   }
 }
