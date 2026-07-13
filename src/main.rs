@@ -20,6 +20,14 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+enum ProxyCommand {
+    /// Start the proxy daemon
+    Start,
+    /// Stop the running proxy daemon
+    Stop,
+}
+
+#[derive(Subcommand)]
 enum Commands {
     /// Add a new profile interactively
     Add {
@@ -42,9 +50,9 @@ enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
     },
-    /// Start the local proxy daemon (internal use)
-    #[command(name = "proxy")]
-    Proxy,
+    /// Manage the local proxy daemon
+    #[command(subcommand)]
+    Proxy(ProxyCommand),
 }
 
 fn main() -> Result<()> {
@@ -68,7 +76,10 @@ fn main() -> Result<()> {
             profile_name,
             command,
         }) => run_env(profile_name.as_deref(), &command),
-        Some(Commands::Proxy) => run_proxy(),
+        Some(Commands::Proxy(cmd)) => match cmd {
+            ProxyCommand::Start => run_proxy_start(),
+            ProxyCommand::Stop => stop_proxy(),
+        },
         None => run_tui(),
     }
 }
@@ -201,9 +212,20 @@ fn reload_profiles_and_select(app: &mut App, selected_name: &str) -> Result<()> 
     Ok(())
 }
 
-fn run_proxy() -> Result<()> {
+fn run_proxy_start() -> Result<()> {
     let port = proxy::proxy_port();
     proxy::run_foreground(port)?;
+    Ok(())
+}
+
+fn stop_proxy() -> Result<()> {
+    let socket_path = proxy::proxy_socket_path();
+    if !proxy::check_proxy_running(&socket_path) {
+        println!("Proxy is not running.");
+        return Ok(());
+    }
+    proxy::shutdown_proxy(&socket_path)?;
+    println!("Proxy shut down.");
     Ok(())
 }
 
@@ -520,6 +542,24 @@ mod tests {
             }
             _ => panic!("expected Env command"),
         }
+    }
+
+    #[test]
+    fn clap_routing_proxy_start() {
+        let cli = Cli::try_parse_from(["cct", "proxy", "start"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Proxy(ProxyCommand::Start))
+        ));
+    }
+
+    #[test]
+    fn clap_routing_proxy_stop() {
+        let cli = Cli::try_parse_from(["cct", "proxy", "stop"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Proxy(ProxyCommand::Stop))
+        ));
     }
 
     #[test]
