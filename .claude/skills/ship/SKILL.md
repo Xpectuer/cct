@@ -34,14 +34,17 @@ git status --porcelain
 If there are no uncommitted changes (clean working tree), tell the user there's
 nothing to ship and stop.
 
-### Step 2: Verify — Test + Clippy
+### Step 2: Verify — Format + Clippy + Test
 
-Run both checks. They must pass with zero errors.
+Run all three checks in order. They must pass with zero errors.
 
 ```bash
-cargo test --verbose
+cargo fmt --check
 cargo clippy -- -D warnings
+cargo test --verbose
 ```
+
+If `cargo fmt --check` fails, run `cargo fmt` first, then re-check, then commit the formatting fix before continuing. Do not proceed past a failing clippy or test suite.
 
 If either fails, report the failure output and stop. Do not proceed with a
 failing suite.
