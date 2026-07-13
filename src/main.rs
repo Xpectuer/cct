@@ -10,7 +10,7 @@ use std::io;
 
 use cct::app::{App, AppMode, FormState};
 use cct::config::Profile;
-use cct::{cli, config, launch, ui};
+use cct::{cli, config, launch, proxy, ui};
 
 #[derive(Parser)]
 #[command(name = "cct", about = "Terminal UI launcher for Claude Code")]
@@ -42,6 +42,9 @@ enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
     },
+    /// Start the local proxy daemon (internal use)
+    #[command(hide = true)]
+    Proxy,
 }
 
 fn main() -> Result<()> {
@@ -63,6 +66,7 @@ fn main() -> Result<()> {
             profile_name,
             command,
         }) => run_env(profile_name.as_deref(), &command),
+        Some(Commands::Proxy) => run_proxy(),
         None => run_tui(),
     }
 }
@@ -192,6 +196,12 @@ fn reload_profiles_and_select(app: &mut App, selected_name: &str) -> Result<()> 
         .unwrap_or_else(|| updated.len().saturating_sub(1));
     app.selected = selected;
     app.profiles = updated;
+    Ok(())
+}
+
+fn run_proxy() -> Result<()> {
+    let port = proxy::proxy_port();
+    proxy::run_foreground(port)?;
     Ok(())
 }
 

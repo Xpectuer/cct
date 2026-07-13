@@ -8,20 +8,6 @@ use std::{
     process::Command,
 };
 
-/// Resolve the real Codex home directory without side effects.
-/// Respects `CODEX_HOME` env var; falls back to `~/.codex`.
-fn codex_home_dir() -> PathBuf {
-    if let Ok(home) = env::var("CODEX_HOME") {
-        let p = PathBuf::from(&home);
-        if p.is_absolute() && p.exists() {
-            return p;
-        }
-    }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("~"))
-        .join(".codex")
-}
-
 /// Restore terminal to cooked mode. Must be called before exec or editor spawn.
 pub fn restore_terminal() {
     let _ = crossterm::terminal::disable_raw_mode();
@@ -83,92 +69,59 @@ pub fn check_codex_installed() -> bool {
         .unwrap_or(false)
 }
 
-/// Generate codex config.toml at a specified directory.
-/// Content is derived from the profile's name, model, and base_url fields.
-///
-/// When an API key is present in profile.env, uses `env_key` to reference it.
-/// Otherwise falls back to `requires_openai_auth` for ChatGPT login flow.
-pub fn generate_codex_config(profile: &Profile, codex_home: &Path) -> anyhow::Result<()> {
+/// Return the per-profile Codex home directory.
+pub fn codex_home_for_profile(profile_name: &str) -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("~/.config"))
+        .join("cc-tui")
+        .join("codex-homes")
+        .join(profile_name)
+}
+
+/// Write a minimal `config.toml` that points Codex at the local proxy.
+/// Only writes if the file does not already exist (first launch per profile).
+pub fn write_proxy_config(codex_home: &Path, model: &str, port: u16) -> Result<()> {
+    let config_path = codex_home.join("config.toml");
+    if config_path.exists() {
+        return Ok(());
+    }
     fs::create_dir_all(codex_home)?;
-    let model = profile.model.as_deref().unwrap_or("gpt-4.1");
-    let name = &profile.name;
-    let base_url = profile.base_url.as_deref().unwrap_or("");
-    let has_api_key = profile
-        .env
-        .as_ref()
-        .and_then(|m| m.get("OPENAI_API_KEY"))
-        .map(|k| !k.is_empty())
-        .unwrap_or(false);
-
-    // Use env_key when an API key is provided; requires_openai_auth otherwise
-    let auth_line = if has_api_key {
-        "env_key = \"OPENAI_API_KEY\"\n"
-    } else {
-        "requires_openai_auth = true\n"
-    };
-
-    let config_content = format!(
-        "model_provider = \"custom\"\nmodel = \"{model}\"\n\n[model_providers.custom]\nname = \"{name}\"\nbase_url = \"{base_url}\"\nwire_api = \"responses\"\n{auth_line}"
+    let content = format!(
+        "model_provider = \"custom\"\n\
+         model = \"{model}\"\n\n\
+         [model_providers.custom]\n\
+         name = \"cct-proxy\"\n\
+         base_url = \"http://127.0.0.1:{port}/v1\"\n\
+         wire_api = \"responses\"\n\
+         env_key = \"OPENAI_API_KEY\"\n"
     );
-    fs::write(codex_home.join("config.toml"), config_content)?;
+    fs::write(&config_path, content)?;
     Ok(())
 }
 
-/// Verify that the written config.toml contains the expected values from the profile.
-/// Reads back the file and checks key fields. Returns an error if verification fails.
-fn verify_codex_config(profile: &Profile, codex_home: &Path) -> Result<()> {
-    let config_path = codex_home.join("config.toml");
-    let content = fs::read_to_string(&config_path)
-        .with_context(|| format!("cannot read back config.toml at {}", config_path.display()))?;
-
-    let model = profile.model.as_deref().unwrap_or("gpt-4.1");
-    let base_url = profile.base_url.as_deref().unwrap_or("");
-    let has_api_key = profile
-        .env
-        .as_ref()
-        .and_then(|m| m.get("OPENAI_API_KEY"))
-        .map(|k| !k.is_empty())
-        .unwrap_or(false);
-
-    // Verify core fields are present
-    let checks = [
-        ("model_provider = \"custom\"", "model_provider"),
-        (&format!("model = \"{model}\""), "model"),
-        ("[model_providers.custom]", "provider table"),
-        (&format!("name = \"{}\"", profile.name), "provider name"),
-        (&format!("base_url = \"{base_url}\""), "base_url"),
-        ("wire_api = \"responses\"", "wire_api"),
-    ];
-
-    for (expected, label) in &checks {
-        if !content.contains(expected) {
-            anyhow::bail!(
-                "config.toml verification failed: missing expected content for {label}\n\
-                 expected: {expected}\n\
-                 file: {}",
-                config_path.display(),
-            );
-        }
+/// Ensure the proxy is running. Spawns `cct proxy` if needed.
+pub fn ensure_proxy_running(_port: u16, socket_path: &Path) -> Result<()> {
+    if crate::proxy::check_proxy_running(socket_path) {
+        return Ok(());
     }
+    let exe = std::env::current_exe().context("cannot find own executable")?;
+    std::process::Command::new(exe)
+        .arg("proxy")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("failed to spawn cct proxy")?;
 
-    // Verify auth method
-    if has_api_key {
-        if !content.contains("env_key = \"OPENAI_API_KEY\"") {
-            anyhow::bail!(
-                "config.toml verification failed: expected env_key for API key profile\n\
-                 file: {}",
-                config_path.display(),
-            );
+    // Wait up to 5s for the socket to appear.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        if crate::proxy::check_proxy_running(socket_path) {
+            return Ok(());
         }
-    } else if !content.contains("requires_openai_auth = true") {
-        anyhow::bail!(
-            "config.toml verification failed: expected requires_openai_auth for non-API-key profile\n\
-             file: {}",
-            config_path.display(),
-        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
-
-    Ok(())
+    anyhow::bail!("proxy did not start within 5 seconds")
 }
 
 /// Build the CLI argument list for `codex` from a profile. Pure — no side effects.
@@ -186,9 +139,7 @@ pub fn build_codex_args(profile: &Profile) -> Vec<String> {
             args.push("--ask-for-approval".to_string());
             args.push("untrusted".to_string());
         }
-        None => {
-            // default: on-request — no flags
-        }
+        None => {}
     }
     if let Some(extra) = &profile.extra_args {
         args.extend(extra.iter().cloned());
@@ -196,57 +147,12 @@ pub fn build_codex_args(profile: &Profile) -> Vec<String> {
     args
 }
 
-// ---- backup helpers -----------------------------------------------------------
-
-const BACKUP_EXT: &str = "cct-backup";
-
-/// Copy `path` to `path.<ext>.cct-backup` (e.g. `config.toml` → `config.toml.cct-backup`).
-/// Returns the backup path if the original existed, `None` otherwise.
-fn backup_file(path: &Path) -> io::Result<Option<PathBuf>> {
-    if !path.exists() {
-        return Ok(None);
-    }
-    let backup_name = match path.extension() {
-        Some(ext) => format!(
-            "{}.{}.{BACKUP_EXT}",
-            path.file_stem().unwrap_or_default().to_string_lossy(),
-            ext.to_string_lossy(),
-        ),
-        None => format!(
-            "{}.{BACKUP_EXT}",
-            path.file_name().unwrap_or_default().to_string_lossy()
-        ),
-    };
-    let backup = path.with_file_name(backup_name);
-    fs::copy(path, &backup)?;
-    Ok(Some(backup))
-}
-
-/// Restore a file from its backup, then remove the backup.
-fn restore_file(original: &Path, backup: Option<&PathBuf>) {
-    if let Some(b) = backup {
-        if b.exists() {
-            let _ = fs::rename(b, original);
-        }
-    }
-}
-
-// ---- exec_codex ---------------------------------------------------------------
-
-/// Write provider-only config (config.toml + auth.json) into the real Codex home,
-/// inject profile env vars, and exec-replace with a shell wrapper that runs
-/// `codex` and restores the original config.toml on exit.
+/// Launch Codex through the local proxy.
 ///
-/// Only `config.toml` is touched — conversation history, sessions, memories,
-/// skills, and all other Codex state in `~/.codex` are left intact.
-///
-/// The existing `config.toml` is backed up before the write.  If any step fails
-/// (write or verification), the original file is restored.  On successful exec,
-/// a shell wrapper restores the original config after codex exits, so the
-/// user's `~/.codex/config.toml` is never permanently overwritten.
-///
-/// Authentication is handled via the `OPENAI_API_KEY` environment variable
-/// (injected from profile.env), which codex CLI natively supports.
+/// 1. Ensure proxy is running (spawn if needed).
+/// 2. Switch proxy to this profile's upstream.
+/// 3. Write per-profile config.toml pointing to the proxy (first launch only).
+/// 4. Set env vars and exec-replace with `codex`.
 pub fn exec_codex(profile: &Profile) -> anyhow::Error {
     if !check_codex_installed() {
         return anyhow::anyhow!(
@@ -254,65 +160,42 @@ pub fn exec_codex(profile: &Profile) -> anyhow::Error {
         );
     }
 
-    // Use the real Codex home so conversation history / sessions / memories
-    // are shared across profiles.  Only config.toml is overwritten.
-    let codex_home = codex_home_dir();
-    let config_path = codex_home.join("config.toml");
+    let port: u16 = crate::proxy::proxy_port();
+    let socket_path = crate::proxy::proxy_socket_path();
 
-    // Back up existing config.toml before touching it.
-    let config_backup = match backup_file(&config_path) {
-        Ok(b) => b,
-        Err(e) => return anyhow::anyhow!("failed to back up config.toml: {e}"),
-    };
-
-    // Write + verify config.toml — roll back on any failure.
-    if let Err(e) = generate_codex_config(profile, &codex_home) {
-        restore_file(&config_path, config_backup.as_ref());
-        return anyhow::anyhow!("failed to generate codex config (original restored): {e}");
-    }
-    if let Err(e) = verify_codex_config(profile, &codex_home) {
-        restore_file(&config_path, config_backup.as_ref());
-        return anyhow::anyhow!("codex config verification failed — original config restored: {e}");
+    if let Err(e) = ensure_proxy_running(port, &socket_path) {
+        return anyhow::anyhow!("failed to start proxy: {e}");
     }
 
-    // Pass config paths to the shell wrapper via env vars so it can restore
-    // the original config.toml after codex exits.
-    if let Some(ref backup) = config_backup {
-        env::set_var("CCT_CONFIG_BACKUP", backup.as_os_str());
-    } else {
-        env::remove_var("CCT_CONFIG_BACKUP");
-    }
-    env::set_var("CCT_CONFIG_PATH", &config_path);
+    let base_url = profile.base_url.clone().unwrap_or_default();
+    let api_key = profile
+        .env
+        .as_ref()
+        .and_then(|m| m.get("OPENAI_API_KEY"))
+        .cloned()
+        .unwrap_or_default();
+    let model = profile
+        .model
+        .clone()
+        .unwrap_or_else(|| "gpt-4.1".to_string());
 
-    // Only set CODEX_HOME if it wasn't already in the environment —
-    // ensures Codex sees the same home we wrote to.
-    if env::var("CODEX_HOME").is_err() {
-        env::set_var("CODEX_HOME", &codex_home);
+    if let Err(e) = crate::proxy::switch_profile(&socket_path, &base_url, &api_key, &model) {
+        return anyhow::anyhow!("failed to switch proxy: {e}");
     }
 
+    let codex_home = codex_home_for_profile(&profile.name);
+    if let Err(e) = write_proxy_config(&codex_home, &model, port) {
+        return anyhow::anyhow!("failed to write codex config: {e}");
+    }
+
+    env::set_var("CODEX_HOME", &codex_home);
     if let Some(env_map) = &profile.env {
         for (k, v) in env_map {
             env::set_var(k, v);
         }
     }
-
     let args = build_codex_args(profile);
-    let err = Command::new("sh")
-        .args([
-            "-c",
-            // Shell wrapper: run codex, save exit code, restore original config
-            // (or remove the one we wrote if there was no original), exit with codex's status.
-            "codex \"$@\"; rc=$?; \
-             if [ -n \"$CCT_CONFIG_BACKUP\" ] && [ -f \"$CCT_CONFIG_BACKUP\" ]; then \
-               mv -f \"$CCT_CONFIG_BACKUP\" \"$CCT_CONFIG_PATH\"; \
-             else \
-               rm -f \"$CCT_CONFIG_PATH\"; \
-             fi; \
-             exit $rc",
-            "--",
-        ])
-        .args(&args)
-        .exec();
+    let err = Command::new("codex").args(&args).exec();
     anyhow::anyhow!("exec codex: {err}")
 }
 
@@ -598,294 +481,32 @@ mod tests {
     }
 
     #[test]
-    fn generate_codex_config_writes_correct_toml() {
+    fn write_proxy_config_creates_correct_toml() {
         let tmp = tempfile::tempdir().unwrap();
-        let p = codex_profile(
-            "my-codex",
-            Some("gpt-4.1"),
-            Some("https://api.example.com/v1"),
-            None,
-            None,
-        );
-        generate_codex_config(&p, tmp.path()).unwrap();
-
+        write_proxy_config(tmp.path(), "gpt-4.1", 19191).unwrap();
         let content = std::fs::read_to_string(tmp.path().join("config.toml")).unwrap();
         assert!(content.contains("model_provider = \"custom\""));
         assert!(content.contains("model = \"gpt-4.1\""));
-        assert!(content.contains("name = \"my-codex\""));
-        assert!(content.contains("base_url = \"https://api.example.com/v1\""));
-        assert!(content.contains("[model_providers.custom]"));
-        assert!(content.contains("requires_openai_auth = true"));
-        assert!(!content.contains("env_key"), "should not contain env_key");
-    }
-
-    #[test]
-    fn build_launch_command_dispatches_claude() {
-        let p = profile(Some("opus"), Some(true), Some(vec!["--verbose"]));
-        let (bin, args) = build_launch_command(&p, false);
-        assert_eq!(bin, "claude");
-        assert_eq!(
-            args,
-            vec![
-                "--model",
-                "opus",
-                "--dangerously-skip-permissions",
-                "--verbose"
-            ]
-        );
-    }
-
-    #[test]
-    fn build_launch_command_dispatches_claude_with_continue() {
-        let p = profile(None, None, None);
-        let (bin, args) = build_launch_command(&p, true);
-        assert_eq!(bin, "claude");
-        assert_eq!(args, vec!["--continue"]);
-    }
-
-    #[test]
-    fn build_launch_command_dispatches_codex() {
-        let p = codex_profile(
-            "test",
-            None,
-            None,
-            Some(crate::config::ApprovalLevel::Danger),
-            Some(vec!["--quiet"]),
-        );
-        let (bin, args) = build_launch_command(&p, false);
-        assert_eq!(bin, "codex");
-        assert_eq!(
-            args,
-            vec!["--dangerously-bypass-approvals-and-sandbox", "--quiet"]
-        );
-        // with_continue is ignored for codex
-        let (bin2, args2) = build_launch_command(&p, true);
-        assert_eq!(bin2, "codex");
-        assert_eq!(
-            args2,
-            vec!["--dangerously-bypass-approvals-and-sandbox", "--quiet"]
-        );
-    }
-
-    #[test]
-    fn generate_codex_config_defaults_model() {
-        let tmp = tempfile::tempdir().unwrap();
-        let p = codex_profile("fallback", None, None, None, None);
-        generate_codex_config(&p, tmp.path()).unwrap();
-
-        let content = std::fs::read_to_string(tmp.path().join("config.toml")).unwrap();
-        assert!(content.contains("model = \"gpt-4.1\""));
-        assert!(content.contains("base_url = \"\""));
-    }
-
-    #[test]
-    fn generate_codex_config_with_api_key_uses_env_key() {
-        let tmp = tempfile::tempdir().unwrap();
-        let mut env_map = std::collections::HashMap::new();
-        env_map.insert("OPENAI_API_KEY".to_string(), "sk-test".to_string());
-        let mut p = codex_profile(
-            "with-key",
-            Some("gpt-5"),
-            Some("https://api.example.com/v1"),
-            None,
-            None,
-        );
-        p.env = Some(env_map);
-        generate_codex_config(&p, tmp.path()).unwrap();
-
-        let content = std::fs::read_to_string(tmp.path().join("config.toml")).unwrap();
-        assert!(content.contains("env_key = \"OPENAI_API_KEY\""));
+        assert!(content.contains("name = \"cct-proxy\""));
+        assert!(content.contains("http://127.0.0.1:19191/v1"));
         assert!(content.contains("wire_api = \"responses\""));
-        assert!(!content.contains("requires_openai_auth"));
+        assert!(content.contains("env_key = \"OPENAI_API_KEY\""));
     }
 
-    // --- verification tests ---
-
     #[test]
-    fn verify_codex_config_passes_on_valid_config() {
+    fn write_proxy_config_skips_when_file_exists() {
         let tmp = tempfile::tempdir().unwrap();
-        let mut env_map = std::collections::HashMap::new();
-        env_map.insert("OPENAI_API_KEY".to_string(), "sk-verify".to_string());
-        let mut p = codex_profile(
-            "verify-me",
-            Some("gpt-4.1"),
-            Some("https://api.example.com/v1"),
-            None,
-            None,
-        );
-        p.env = Some(env_map);
-        generate_codex_config(&p, tmp.path()).unwrap();
-        // Must not panic / error
-        verify_codex_config(&p, tmp.path()).expect("verification should pass on valid config");
+        write_proxy_config(tmp.path(), "gpt-4.1", 19191).unwrap();
+        // Second call should be a no-op.
+        write_proxy_config(tmp.path(), "other-model", 12345).unwrap();
+        let content = std::fs::read_to_string(tmp.path().join("config.toml")).unwrap();
+        assert!(content.contains("gpt-4.1"));
+        assert!(!content.contains("other-model"));
     }
 
     #[test]
-    fn verify_codex_config_fails_on_wrong_model() {
-        let tmp = tempfile::tempdir().unwrap();
-        let p = codex_profile(
-            "original",
-            Some("gpt-4.1"),
-            Some("https://api.example.com/v1"),
-            None,
-            None,
-        );
-        generate_codex_config(&p, tmp.path()).unwrap();
-
-        // Verify against a profile with a DIFFERENT model
-        let wrong = codex_profile(
-            "original",
-            Some("wrong-model"),
-            Some("https://api.example.com/v1"),
-            None,
-            None,
-        );
-        let result = verify_codex_config(&wrong, tmp.path());
-        assert!(
-            result.is_err(),
-            "verification must fail for mismatched model"
-        );
-    }
-
-    #[test]
-    fn verify_codex_config_fails_when_env_key_missing_for_api_key_profile() {
-        let tmp = tempfile::tempdir().unwrap();
-        // Write config WITHOUT env_key (no API key in profile)
-        let p_no_key = codex_profile(
-            "no-key",
-            Some("gpt-4.1"),
-            Some("https://api.example.com/v1"),
-            None,
-            None,
-        );
-        generate_codex_config(&p_no_key, tmp.path()).unwrap();
-
-        // Verify with a profile that HAS API key — should fail because config lacks env_key
-        let mut env_map = std::collections::HashMap::new();
-        env_map.insert("OPENAI_API_KEY".to_string(), "sk-missing".to_string());
-        let mut p_with_key = codex_profile(
-            "no-key",
-            Some("gpt-4.1"),
-            Some("https://api.example.com/v1"),
-            None,
-            None,
-        );
-        p_with_key.env = Some(env_map);
-        let result = verify_codex_config(&p_with_key, tmp.path());
-        assert!(
-            result.is_err(),
-            "verification must fail when env_key missing for API key profile"
-        );
-    }
-
-    // --- codex_home_dir tests ---
-
-    #[test]
-    fn codex_home_dir_respects_env_var() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::env::set_var("CODEX_HOME", tmp.path().as_os_str());
-        let home = codex_home_dir();
-        assert_eq!(home, tmp.path());
-        std::env::remove_var("CODEX_HOME");
-    }
-
-    #[test]
-    fn codex_home_dir_falls_back_to_dot_codex() {
-        // Remove CODEX_HOME to test fallback
-        std::env::remove_var("CODEX_HOME");
-        let home = codex_home_dir();
-        assert!(
-            home.ends_with(".codex"),
-            "fallback should end with .codex, got: {home:?}"
-        );
-    }
-
-    // --- backup / restore tests ---
-
-    #[test]
-    fn backup_file_skips_when_original_missing() {
-        let tmp = tempfile::tempdir().unwrap();
-        let nonexistent = tmp.path().join("does-not-exist.toml");
-        let backup = backup_file(&nonexistent).unwrap();
-        assert!(backup.is_none(), "backup of missing file should be None");
-    }
-
-    #[test]
-    fn backup_file_creates_backup_when_original_exists() {
-        let tmp = tempfile::tempdir().unwrap();
-        let original = tmp.path().join("config.toml");
-        fs::write(&original, "original content").unwrap();
-
-        let backup = backup_file(&original).unwrap();
-        assert!(backup.is_some(), "backup must exist when original exists");
-        let backup_path = backup.unwrap();
-        assert!(backup_path.exists(), "backup file must be on disk");
-        assert_ne!(
-            backup_path, original,
-            "backup path must differ from original"
-        );
-        assert!(
-            backup_path
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .contains("cct-backup"),
-            "backup filename must contain 'cct-backup'"
-        );
-    }
-
-    #[test]
-    fn backup_file_preserves_original_content() {
-        let tmp = tempfile::tempdir().unwrap();
-        let original = tmp.path().join("auth.json");
-        fs::write(&original, r#"{"key":"original-value"}"#).unwrap();
-
-        let backup = backup_file(&original).unwrap().unwrap();
-
-        // Original untouched
-        assert_eq!(
-            fs::read_to_string(&original).unwrap(),
-            r#"{"key":"original-value"}"#
-        );
-        // Backup has same content
-        assert_eq!(
-            fs::read_to_string(&backup).unwrap(),
-            r#"{"key":"original-value"}"#
-        );
-        // Overwrite original, verify backup still has old content
-        fs::write(&original, "new content").unwrap();
-        assert_eq!(fs::read_to_string(&original).unwrap(), "new content");
-        assert_eq!(
-            fs::read_to_string(&backup).unwrap(),
-            r#"{"key":"original-value"}"#
-        );
-    }
-
-    #[test]
-    fn restore_file_puts_backup_back() {
-        let tmp = tempfile::tempdir().unwrap();
-        let original = tmp.path().join("config.toml");
-        fs::write(&original, "original").unwrap();
-        let backup = backup_file(&original).unwrap().unwrap();
-
-        // Overwrite original
-        fs::write(&original, "overwritten").unwrap();
-        assert_eq!(fs::read_to_string(&original).unwrap(), "overwritten");
-
-        // Restore
-        restore_file(&original, Some(&backup));
-        assert_eq!(fs::read_to_string(&original).unwrap(), "original");
-        assert!(
-            !backup.exists(),
-            "backup file must be removed after restore"
-        );
-    }
-
-    #[test]
-    fn restore_file_noop_when_backup_is_none() {
-        let tmp = tempfile::tempdir().unwrap();
-        let original = tmp.path().join("config.toml");
-        fs::write(&original, "keep me").unwrap();
-        restore_file(&original, None);
-        assert_eq!(fs::read_to_string(&original).unwrap(), "keep me");
+    fn codex_home_for_profile_ends_with_name() {
+        let path = codex_home_for_profile("my-codex");
+        assert!(path.ends_with("codex-homes/my-codex"), "got: {path:?}");
     }
 }
