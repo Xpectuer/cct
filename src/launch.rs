@@ -1,12 +1,7 @@
 use crate::config::Profile;
 use anyhow::{Context, Result};
 use crossterm::{execute, terminal::LeaveAlternateScreen};
-use std::{
-    env, fs, io,
-    os::unix::process::CommandExt,
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::{env, fs, io, os::unix::process::CommandExt, path::Path, process::Command};
 
 /// Restore terminal to cooked mode. Must be called before exec or editor spawn.
 pub fn restore_terminal() {
@@ -69,34 +64,24 @@ pub fn check_codex_installed() -> bool {
         .unwrap_or(false)
 }
 
-/// Return the per-profile Codex home directory.
-pub fn codex_home_for_profile(profile_name: &str) -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("~/.config"))
-        .join("cc-tui")
-        .join("codex-homes")
-        .join(profile_name)
-}
-
-/// Write a minimal `config.toml` that points Codex at the local proxy.
-/// Only writes if the file does not already exist (first launch per profile).
-pub fn write_proxy_config(codex_home: &Path, model: &str, port: u16) -> Result<()> {
-    let config_path = codex_home.join("config.toml");
-    if config_path.exists() {
-        return Ok(());
-    }
-    fs::create_dir_all(codex_home)?;
-    let content = format!(
-        "model_provider = \"custom\"\n\
-         model = \"{model}\"\n\n\
-         [model_providers.custom]\n\
-         name = \"cct-proxy\"\n\
-         base_url = \"http://127.0.0.1:{port}/v1\"\n\
-         wire_api = \"responses\"\n\
-         env_key = \"OPENAI_API_KEY\"\n"
-    );
-    fs::write(&config_path, content)?;
-    Ok(())
+/// Build `--config` CLI flags to configure the custom provider pointing at cct proxy.
+/// Equivalent to the old config.toml approach, but passed inline so CODEX_HOME is
+/// left at its default (~/.codex) and all profiles share history/sessions.
+pub fn build_codex_proxy_config_args(model: &str, port: u16) -> Vec<String> {
+    vec![
+        "--config".to_string(),
+        "model_provider=custom".to_string(),
+        "--config".to_string(),
+        format!("model={model}"),
+        "--config".to_string(),
+        "model_providers.custom.name=cct-proxy".to_string(),
+        "--config".to_string(),
+        format!("model_providers.custom.base_url=http://127.0.0.1:{port}/v1"),
+        "--config".to_string(),
+        "model_providers.custom.wire_api=responses".to_string(),
+        "--config".to_string(),
+        "model_providers.custom.env_key=OPENAI_API_KEY".to_string(),
+    ]
 }
 
 /// Ensure the proxy is running. Spawns `cct proxy` if needed.
@@ -179,8 +164,8 @@ fn build_shared_codex_args(profile: &Profile) -> Vec<String> {
 ///
 /// 1. Ensure proxy is running (spawn if needed).
 /// 2. Switch proxy to this profile's upstream.
-/// 3. Write per-profile config.toml pointing to the proxy (first launch only).
-/// 4. Set CODEX_HOME and env vars, exec-replace with `codex`.
+/// 3. Pass custom provider config via `--config` CLI flags (no config.toml).
+/// 4. Leave CODEX_HOME at default (~/.codex) so all profiles share history/sessions.
 fn exec_codex_proxy(profile: &Profile) -> anyhow::Error {
     let port: u16 = crate::proxy::proxy_port();
     let socket_path = crate::proxy::proxy_socket_path();
@@ -205,18 +190,13 @@ fn exec_codex_proxy(profile: &Profile) -> anyhow::Error {
         return anyhow::anyhow!("failed to switch proxy: {e}");
     }
 
-    let codex_home = codex_home_for_profile(&profile.name);
-    if let Err(e) = write_proxy_config(&codex_home, &model, port) {
-        return anyhow::anyhow!("failed to write codex config: {e}");
-    }
-
-    env::set_var("CODEX_HOME", &codex_home);
     if let Some(env_map) = &profile.env {
         for (k, v) in env_map {
             env::set_var(k, v);
         }
     }
-    let args = build_codex_args(profile);
+    let mut args = build_codex_proxy_config_args(&model, port);
+    args.append(&mut build_shared_codex_args(profile));
     let err = Command::new("codex").args(&args).exec();
     anyhow::anyhow!("exec codex: {err}")
 }
@@ -578,32 +558,33 @@ mod tests {
     }
 
     #[test]
-    fn write_proxy_config_creates_correct_toml() {
-        let tmp = tempfile::tempdir().unwrap();
-        write_proxy_config(tmp.path(), "gpt-4.1", 19191).unwrap();
-        let content = std::fs::read_to_string(tmp.path().join("config.toml")).unwrap();
-        assert!(content.contains("model_provider = \"custom\""));
-        assert!(content.contains("model = \"gpt-4.1\""));
-        assert!(content.contains("name = \"cct-proxy\""));
-        assert!(content.contains("http://127.0.0.1:19191/v1"));
-        assert!(content.contains("wire_api = \"responses\""));
-        assert!(content.contains("env_key = \"OPENAI_API_KEY\""));
+    fn build_codex_proxy_config_args_includes_model_and_port() {
+        let args = build_codex_proxy_config_args("gpt-4.1", 19191);
+        assert_eq!(
+            args,
+            vec![
+                "--config",
+                "model_provider=custom",
+                "--config",
+                "model=gpt-4.1",
+                "--config",
+                "model_providers.custom.name=cct-proxy",
+                "--config",
+                "model_providers.custom.base_url=http://127.0.0.1:19191/v1",
+                "--config",
+                "model_providers.custom.wire_api=responses",
+                "--config",
+                "model_providers.custom.env_key=OPENAI_API_KEY",
+            ]
+        );
     }
 
     #[test]
-    fn write_proxy_config_skips_when_file_exists() {
-        let tmp = tempfile::tempdir().unwrap();
-        write_proxy_config(tmp.path(), "gpt-4.1", 19191).unwrap();
-        // Second call should be a no-op.
-        write_proxy_config(tmp.path(), "other-model", 12345).unwrap();
-        let content = std::fs::read_to_string(tmp.path().join("config.toml")).unwrap();
-        assert!(content.contains("gpt-4.1"));
-        assert!(!content.contains("other-model"));
-    }
-
-    #[test]
-    fn codex_home_for_profile_ends_with_name() {
-        let path = codex_home_for_profile("my-codex");
-        assert!(path.ends_with("codex-homes/my-codex"), "got: {path:?}");
+    fn build_codex_proxy_config_args_different_model_and_port() {
+        let args = build_codex_proxy_config_args("o4-mini", 29999);
+        assert!(args.contains(&"model=o4-mini".to_string()));
+        assert!(
+            args.contains(&"model_providers.custom.base_url=http://127.0.0.1:29999/v1".to_string())
+        );
     }
 }
