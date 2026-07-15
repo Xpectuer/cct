@@ -133,6 +133,7 @@ Lessons:
 - [cct env can inject env vars into happy daemon](docs/lessons/happy-daemon-env-injection-via-cct.md) — use `cct env <profile> -- happy daemon start` to seed daemon sessions with profile env
 - [install.sh 404 network issue](docs/lessons/install-script-404-network-issue.md) — HTTP 404 from GitHub API can mean connectivity failure, not missing releases
 - [GitLab Runner SSH cloning on self-hosted](docs/lessons/gitlab-runner-ssh-cloning-self-hosted.md) — helper image uses apk not apt-get; volume-mounted .ssh has wrong ownership; tagged runners ignore untagged jobs
+- [Clap subcommand changes must sync spawn args](docs/lessons/clap-subcommand-sync-spawn-args.md) — when a clap subcommand gains a required child enum, every `Command::new` that spawns the binary with that subcommand must be updated
 
 References:
 - [install-script reference](docs/references/install-script.md) — curl|bash installer functions and test coverage

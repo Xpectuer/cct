@@ -31,8 +31,13 @@ past a failure.
 git status --porcelain
 ```
 
-If there are no uncommitted changes (clean working tree), tell the user there's
-nothing to ship and stop.
+- If there are **staged or modified** files (first/second column non-empty):
+  proceed to Step 2.
+- If there are **only untracked** files (`??`):
+  list them and ask the user whether to include them. If yes, `git add` the
+  ones they want and proceed. If no, stop — nothing to ship.
+- If the working tree is **completely clean**: tell the user there's nothing
+  to ship and stop.
 
 ### Step 2: Verify — Format + Clippy + Test
 
@@ -110,38 +115,64 @@ git tag -a "vX.Y.Z" -m "vX.Y.Z"
 
 ### Step 7: Push
 
-Push the commits and the tag:
+Push the commits and the tag to `origin` (GitHub):
 
 ```bash
 git push origin master
 git push origin "vX.Y.Z"
 ```
 
+Then, if a `gitlab` remote exists, push there too (best-effort — failure is a
+warning, not a blocker):
+
+```bash
+git push gitlab master
+git push gitlab "vX.Y.Z"
+```
+
+If the gitlab push fails (e.g., remote unreachable, authentication error),
+warn the user but continue — the GitHub release is the primary artifact.
+
 ### Step 8: Monitor CI/CD
 
 After pushing, both GitHub Actions and GitLab CI will trigger on the new tag
-(`v*`). Set up a cron job to monitor them every 5 minutes:
+(`v*`).
+
+**GitHub Actions** — use `gh`:
 
 ```bash
-# Check GitHub Actions run for the tag
 gh run list --branch "vX.Y.Z" --limit 5 --json status,conclusion,name,url
+```
 
-# Check GitLab pipeline for the tag
+**GitLab CI** — only if `GITLAB_TOKEN` is available. Source `~/.env` (and
+`./.env` if present) to load it. Derive `CI_API_V4_URL` and `PROJECT_ID` from
+the gitlab remote URL:
+
+```bash
+# Source env files to get GITLAB_TOKEN
+source ~/.env 2>/dev/null; source ./.env 2>/dev/null
+
+# Derive GitLab API URL from remote (e.g. git@gitlab.clounix.com:zhengjy/cc_starter.git)
+CI_API_V4_URL="https://<gitlab-host>/api/v4"
+# Project ID is the URL-encoded path after the colon: zhengjy%2Fcc_starter
+PROJECT_ID="<url-encoded-path>"
+
 curl -sS --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
   "${CI_API_V4_URL}/projects/${PROJECT_ID}/pipelines?ref=vX.Y.Z&per_page=3"
 ```
 
-Use a 5-minute cron (via `CronCreate`) to poll the CI status. Report to the
-user when:
-- **GitHub Actions**: the `Release` workflow completes successfully (release
-  created with artifacts).
-- **GitLab CI**: the `release` job completes successfully.
+If `GITLAB_TOKEN` is not found in either file, skip GitLab CI monitoring
+entirely — just monitor GitHub Actions.
 
-If a job fails, report the failure with a link to the logs immediately — don't
-wait for the full pipeline.
+After pushing, set up a cron job (via `CronCreate`, durable: false) to poll
+CI status every 5 minutes. Report to the user when:
+- **GitHub Actions**: the `Release` workflow completes (release created with
+  artifacts).
+- **GitLab CI** (if token available): the pipeline completes.
 
-The cron should auto-delete after both pipelines succeed (or after 30 minutes
-if still pending — ask the user whether to keep waiting).
+If any job fails, report the failure with a link to the logs immediately.
+The cron should auto-delete after all tracked pipelines succeed, or after 30
+minutes — ask the user whether to keep waiting if jobs are still running.
 
 ## What Gets Built
 

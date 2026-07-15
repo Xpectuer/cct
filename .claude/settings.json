@@ -34,6 +34,7 @@
   },
   "enabledPlugins": {
     "meta@alex-marketplace": true,
-    "lb-env@alex-marketplace": true
+    "lb-env@alex-marketplace": true,
+    "lb-dev@alex-marketplace": true
   }
 }
