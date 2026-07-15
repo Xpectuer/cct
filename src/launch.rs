@@ -95,6 +95,7 @@ pub fn ensure_proxy_running(_port: u16, socket_path: &Path) -> Result<()> {
     let exe = std::env::current_exe().context("cannot find own executable")?;
     let mut cmd = std::process::Command::new(exe);
     cmd.arg("proxy")
+        .arg("start")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null());
 
