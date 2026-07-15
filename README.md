@@ -15,6 +15,7 @@ A terminal UI for managing and launching [Claude Code](https://claude.ai/code) a
 - **Inline profile editing** — press `e` on a selected profile to open a prefilled edit form, update the fields inline, and save back to `profiles.toml`
 - **Profile duplication** — press `d` on a selected profile to duplicate it (appends `_copy` to the name), edit any fields, and save as a new profile
 - **Auto-populated env vars** — providing `base_url`, `api_key`, or `model` in the add flow generates a `[profiles.env]` section with all relevant env vars pre-filled (Anthropic vars for Claude, `OPENAI_API_KEY` for Codex)
+- **Claude launch defaults** — `cct` injects privacy/telemetry defaults (auto-updater off, telemetry opt-outs, attribution header off, etc.) before applying profile env vars, so every Claude profile starts with the same defensive baseline
 - **Sensitive value masking** — env keys containing `TOKEN`, `KEY`, or `SECRET` are redacted in the UI
 - **skip_permissions / full_auto toggle** — press `s` to toggle `--dangerously-skip-permissions` on Claude profiles or `--full-auto` on Codex profiles; the change is persisted immediately to `profiles.toml`
 - **Auth type toggle** — press `t` to switch between `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` on Claude profiles; persisted immediately. Use `cct add --auth-type token` to create token-auth profiles from the CLI

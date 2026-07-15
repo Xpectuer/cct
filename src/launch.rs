@@ -3,6 +3,30 @@ use anyhow::{Context, Result};
 use crossterm::{execute, terminal::LeaveAlternateScreen};
 use std::{env, fs, io, os::unix::process::CommandExt, path::Path, process::Command};
 
+/// Default environment variables injected before launching Claude.
+/// These mirror the privacy/telemetry defaults commonly set in
+/// `~/.claude/settings.json`. Profile-level `env` entries override them.
+const CLAUDE_DEFAULT_ENV: &[(&str, &str)] = &[
+    ("DISABLE_AUTOUPDATER", "1"),
+    ("CLAUDE_CODE_ATTRIBUTION_HEADER", "0"),
+    ("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1"),
+    ("CLAUDE_CODE_ENABLE_TELEMETRY", "0"),
+    ("CLAUDE_CODE_ENHANCED_TELEMETRY_BETA", "0"),
+    ("CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY", "1"),
+    ("CLAUDE_CODE_BYOC_ENABLE_DATADOG", "0"),
+    ("CLAUDE_CODE_PROPAGATE_TRACEPARENT", "0"),
+    ("DISABLE_GROWTHBOOK", "1"),
+    ("DISABLE_INSTALLATION_CHECKS", "1"),
+];
+
+/// Apply `CLAUDE_DEFAULT_ENV` to the current process. Call before
+/// `Command::exec` so the spawned `claude` process inherits them.
+fn set_claude_default_env() {
+    for (k, v) in CLAUDE_DEFAULT_ENV {
+        env::set_var(k, v);
+    }
+}
+
 /// Restore terminal to cooked mode. Must be called before exec or editor spawn.
 pub fn restore_terminal() {
     let _ = crossterm::terminal::disable_raw_mode();
@@ -41,8 +65,7 @@ pub fn build_launch_command(profile: &Profile, with_continue: bool) -> (String, 
 /// Inject profile env vars and exec-replace the current process with `claude`.
 /// Returns only on error (process was not replaced).
 pub fn exec_claude(profile: &Profile, with_continue: bool) -> anyhow::Error {
-    env::set_var("DISABLE_AUTOUPDATER", "1");
-    env::set_var("CLAUDE_CODE_ATTRIBUTION_HEADER", "0");
+    set_claude_default_env();
     if let Some(env_map) = &profile.env {
         for (k, v) in env_map {
             env::set_var(k, v);
@@ -259,8 +282,7 @@ pub fn command_exists(cmd: &str) -> bool {
 /// Inject profile env vars and exec-replace with the command wrapped in `bash -c`.
 /// Returns only on error (process was not replaced).
 pub fn exec_with_env(profile: &Profile, shell_cmd: &str) -> anyhow::Error {
-    env::set_var("DISABLE_AUTOUPDATER", "1");
-    env::set_var("CLAUDE_CODE_ATTRIBUTION_HEADER", "0");
+    set_claude_default_env();
     if let Some(env_map) = &profile.env {
         for (k, v) in env_map {
             env::set_var(k, v);
@@ -358,6 +380,7 @@ pub fn open_editor(path: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use crate::config::Profile;
+    use std::env;
 
     fn profile(model: Option<&str>, skip: Option<bool>, extra: Option<Vec<&str>>) -> Profile {
         Profile {
@@ -587,5 +610,32 @@ mod tests {
         assert!(
             args.contains(&"model_providers.custom.base_url=http://127.0.0.1:29999/v1".to_string())
         );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn claude_default_env_is_injected() {
+        let keys: Vec<&str> = CLAUDE_DEFAULT_ENV.iter().map(|(k, _)| *k).collect();
+        let previous: Vec<Option<String>> = keys.iter().map(|k| env::var(k).ok()).collect();
+        for k in &keys {
+            env::remove_var(k);
+        }
+
+        set_claude_default_env();
+
+        for (k, expected) in CLAUDE_DEFAULT_ENV {
+            assert_eq!(
+                env::var(k).unwrap(),
+                *expected,
+                "expected {k} to be set to {expected}"
+            );
+        }
+
+        for (k, prev) in keys.iter().zip(previous.iter()) {
+            match prev {
+                Some(val) => env::set_var(k, val),
+                None => env::remove_var(k),
+            }
+        }
     }
 }

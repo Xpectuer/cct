@@ -69,7 +69,8 @@ src/main.rs (entry point)
 User presses [Enter] (mode = Normal, active_backend = Claude)
   → launch::restore_terminal()        # disable raw mode, LeaveAlternateScreen
   → launch::exec_claude(&profile, with_continue=false)
-      → env::set_var(k, v) for each profile.env entry
+      → env::set_var(k, v) for default Claude env vars (telemetry opt-outs, auto-updater disable, attribution header off, etc.)
+      → env::set_var(k, v) for each profile.env entry (overrides defaults)
       → launch::build_args(profile, false) # --model, --dangerously-skip-permissions, extra_args
       → Command::new("claude").args(...).exec()  # Unix exec — process replaced, no return
 
@@ -198,7 +199,7 @@ User presses [e]
 | `profiles[].skip_permissions = true` | Claude-only. Adds `--dangerously-skip-permissions` to `claude` invocation. |
 | `profiles[].auth_type = "token"` | Claude-only. Uses `ANTHROPIC_AUTH_TOKEN` env var instead of `ANTHROPIC_API_KEY`. Toggle via `t` key or `cct add --auth-type token`. |
 | `profiles[].extra_args = [...]` | Appended verbatim after other flags |
-| `profiles[].env.*` | Injected as process environment variables before exec |
+| `profiles[].env.*` | Injected as process environment variables before exec; overrides the built-in Claude default env vars |
 | Add-flow `base_url` → `ANTHROPIC_BASE_URL` | Auto-written to `[profiles.env]` by `append_profile` |
 | Add-flow `api_key` → `ANTHROPIC_API_KEY` | Auto-written to `[profiles.env]` by `append_profile` |
 | Add-flow `model` → 5 model alias env vars + `API_TIMEOUT_MS` + `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | Auto-written to `[profiles.env]` by `append_profile` when model is non-empty |
