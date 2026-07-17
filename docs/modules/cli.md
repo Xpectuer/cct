@@ -114,7 +114,7 @@ The only persistent side effect is the file write performed by `config::append_p
 ```rust
 // In main.rs — routing for CLI subcommands:
 match args.command {
-    Some(Commands::Add { auth_type }) => cli::run_add(auth_type),
+    Some(Commands::Add { auth_type, backend }) => cli::run_add(auth_type, backend),
     Some(Commands::Edit) => launch::open_editor(&config::config_path()),
     None => run_tui(),
 }
@@ -122,7 +122,7 @@ match args.command {
 // In tests — inject deterministic input/output:
 let input = b"my-profile\nA description\nhttps://api.example.com\nsk-test-key\nkimi-k2\n\ny\n";
 let mut output: Vec<u8> = Vec::new();
-cli::run_add_with(&input[..], &mut output, None).unwrap();
+cli::run_add_with(&input[..], &mut output, None, config::Backend::Claude).unwrap();
 
 // Verify the profile was created:
 let profiles = config::load_profiles().unwrap();
