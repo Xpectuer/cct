@@ -3,8 +3,8 @@ doc_type: module
 module_name: "ui"
 module_path: "src/ui.rs"
 generated_by: mci-phase-2
-revision: 3
-updated: 2026-03-15
+revision: 4
+updated: 2026-07-17
 ---
 
 # ui Module Documentation
@@ -34,25 +34,26 @@ updated: 2026-03-15
 - `pub fn draw(app: &App, frame: &mut Frame)`
   - The single entry point called each render tick from the event loop in `main`.
   - Internally performs four rendering passes in order:
-    1. Tab bar (top 1 line) — `build_tab_bar()` renders `[Claude] [Codex]` tabs with the active backend highlighted.
+    1. Tab bar (top 1 line) — `build_tab_bar()` renders `[Claude] [Codex] [Kimi]` tabs with the active backend highlighted.
     2. Profile list (left 35%) — `app.filtered_indices()` is used; only profiles matching `app.active_backend` are shown. Stateful `List` widget with blue highlight and `"> "` symbol.
     3. Detail panel (right 65%) — dispatched on `app.mode`:
        - `AppMode::Normal` → `build_detail` for the selected profile.
        - `AppMode::AddForm(form)` → `build_form_lines` for the inline add form.
-    4. Footer (bottom 1 line) — key-binding hint in `DarkGray`; content reflects current mode and `form.confirming`. Includes `[Tab/1/2] Backend` hint.
+    4. Footer (bottom 1 line) — key-binding hint in `DarkGray`; content reflects current mode and `form.confirming`. Includes `[Tab/1/2/3] Backend` hint.
   - Has no return value; all output goes through `frame.render_widget` / `frame.render_stateful_widget`.
 
 ### Private Functions (documented for maintainers)
 
-- `fn build_tab_bar(active_backend: &Backend) -> Paragraph<'static>`
-  - Renders `[Claude] [Codex]` where the active backend is shown in bold/highlighted style.
+- `pub fn build_tab_bar(active: &Backend) -> Vec<Line<'static>>`
+  - Renders `[Claude] [Codex] [Kimi]` where the active backend is shown in bold/highlighted style.
   - Integrated into `draw()` at the top of the layout.
 
 - `fn build_detail(profile: &Profile) -> Vec<Line<'static>>`
   - Constructs the detail panel text from a single `Profile`.
-  - For Codex profiles: shows `backend`, `base_url`, `model`, `full_auto` fields instead of Claude-specific fields.
+  - For Codex profiles: shows `approval` (derived from `full_auto`) and `auth: subscription` fields instead of Claude-specific fields.
+  - For Kimi profiles: shows `max_context_size` — the explicit value (`1m` / `260k`), or `auto (1m)` / `auto (260k)` derived from the model when unset.
   - For Claude profiles with `auth_type = "token"`: shows `auth: token`.
-  - Footer: Claude tab shows `[t] Auth` hint for toggling auth type.
+  - Footer: Claude tab shows `[s] Skip-perms` / `[t] Auth` hints; Kimi tab shows a `[Space] Context` hint for the `max_context_size` toggle (no `[c] Resume`, `[s]`, or `[t]`); hints say `[Tab/1/2/3]`.
   - Returns owned `Vec<Line<'static>>`.
 
 - `fn build_form_lines(form: &FormState) -> Vec<Line<'static>>`
@@ -200,4 +201,4 @@ assert_eq!(display, "https://api.anthropic.com");
 ---
 
 **Template Version**: 2.0
-**Last Updated**: 2026-03-15 (revision 3 — added build_tab_bar, backend-filtered profile list, backend-aware build_form_lines using field_labels, updated footer with Tab/1/2 hint)
+**Last Updated**: 2026-07-17 (revision 4 — Kimi backend: 3-tab bar, `[Tab/1/2/3]` hints, Kimi footer with `[Space] Context`, `max_context_size` in detail panel)

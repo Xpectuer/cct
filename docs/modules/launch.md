@@ -3,13 +3,13 @@ doc_type: module
 module_name: "launch"
 module_path: "src/launch.rs"
 generated_by: mci-phase-2
-revision: 2
-updated: 2026-03-15
+revision: 3
+updated: 2026-07-17
 ---
 
 # launch Module Documentation
 
-> **Purpose**: Handles all process-lifecycle concerns for `cct`: builds CLI argument lists for both Claude and Codex backends, generates Codex config files, exec-replaces the current process, restores terminal state, and opens `$EDITOR` for config hot-reload.
+> **Purpose**: Handles all process-lifecycle concerns for `cct`: builds CLI argument lists for the Claude, Codex, and Kimi backends, generates Codex config files, surgically writes Kimi provider/model entries into `~/.kimi-code/config.toml`, exec-replaces the current process, restores terminal state, and opens `$EDITOR` for config hot-reload.
 > **Path**: src/launch.rs
 
 ---
@@ -34,6 +34,7 @@ updated: 2026-03-15
   - Pure dispatch function; chooses the correct binary and arg builder based on `profile.backend`.
   - `Backend::Claude` → `("claude", build_args(profile, with_continue))`
   - `Backend::Codex` → `("codex", build_codex_args(profile))` (ignores `with_continue`)
+  - `Backend::Kimi` → `("kimi", build_kimi_args(profile))` (ignores `with_continue`)
   - Used by integration tests to verify dispatch without exec-replacing the process.
 
 - `pub fn exec_claude(profile: &Profile, with_continue: bool) -> anyhow::Error`
@@ -73,6 +74,28 @@ updated: 2026-03-15
     4. Sets `CODEX_HOME` environment variable to `codex_home`.
     5. Injects all key-value pairs from `profile.env` (contains `OPENAI_API_KEY`).
     6. Exec-replaces with `codex <build_codex_args(profile)>`.
+  - **Never returns on success**.
+
+- `pub fn check_kimi_installed() -> bool`
+  - Runs `which kimi` to test whether the `kimi` binary is available in `$PATH`. Same pattern as `check_codex_installed`.
+
+- `pub fn prompt_install_kimi() -> Result<()>`
+  - Mirrors `prompt_install()` for claude; runs the official installer `curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash`.
+
+- `pub fn kimi_config_path() -> PathBuf`
+  - Returns the Kimi Code CLI config path: `$CCT_KIMI_CONFIG` if set (test override, mirrors `CCT_CONFIG` in `config::config_path`), else `~/.kimi-code/config.toml`.
+
+- `pub fn generate_kimi_config(profile: &Profile) -> Result<()>`
+  - Surgically writes this profile's entries into the kimi config via `toml_edit::DocumentMut`, creating the parent dir/file if missing and preserving all pre-existing tables (e.g. `managed:kimi-code` providers created by `kimi login`, `services.*`, `default_model`, `thinking`).
+  - Writes `[providers."<profile.name>"]` with `type = "kimi"`, `base_url` (from `profile.base_url`, else env `ANTHROPIC_BASE_URL`; normalized to `https://` scheme + `/v1` suffix with duplicate slashes collapsed), and `api_key` (env `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`).
+  - Writes `[models."<name>/<model>"]` (skipped when the profile has no model) with `provider`, `model`, `max_context_size` (explicit `profile.max_context_size` resolved via `config::resolve_max_context_size`, else model-based default: `k3*` → 1,000,000, otherwise 262,144), `capabilities = ["thinking", "always_thinking", "image_in", "video_in", "tool_use"]`, `display_name` (uppercased model), and — for `k3*` models only — `support_efforts = ["max"]` / `default_effort = "max"` (both keys are removed on re-generation when the model is not `k3*`).
+
+- `pub fn build_kimi_args(profile: &Profile) -> Vec<String>`
+  - Pure function with no side effects.
+  - `["-m", "<profile.name>/<model>"]` (model from `profile.model`, else env `ANTHROPIC_MODEL`; omitted entirely when no model), followed by `extra_args` verbatim.
+
+- `pub fn exec_kimi(profile: &Profile) -> anyhow::Error`
+  - Steps before exec-replace: (1) `check_kimi_installed()` — error if not found; (2) `generate_kimi_config(profile)`; (3) inject all `profile.env` pairs; (4) exec-replace with `kimi <build_kimi_args(profile)>`.
   - **Never returns on success**.
 
 - `pub fn command_exists(cmd: &str) -> bool`
@@ -140,6 +163,8 @@ None — all public surface is functions. The module consumes `crate::config::Pr
 - **`exec_codex`** — Four side effects before exec: (1) writes `~/.config/cct-tui/codex/config.toml`; (2) sets `CODEX_HOME` env var; (3) sets `OPENAI_API_KEY` from `profile.env`; (4) process replacement. `restore_terminal` must be called before `exec_codex`.
 
 - **`generate_codex_config`** — File I/O side effect: creates directory and writes config.toml. It is separated from `exec_codex` to allow unit testing against a temp directory without exec-replacing the process.
+
+- **`generate_kimi_config`** — File I/O side effect: creates `~/.kimi-code/` and surgically edits `config.toml` in place. Path is overridable via `CCT_KIMI_CONFIG` so unit tests run against a temp dir and never touch the real file. `build_kimi_args` is pure, like the other arg builders.
 
 - **`restore_terminal`** — Interacts with global terminal state. Errors suppressed intentionally.
 
@@ -258,4 +283,4 @@ let args_continue = launch::build_args(&profile, true);
 ---
 
 **Template Version**: 2.0
-**Last Updated**: 2026-05-12 (revision 3 — added exec_with_env and command_exists; documented no-shell-expansion behavior)
+**Last Updated**: 2026-07-17 (revision 3 — Kimi backend: check_kimi_installed, prompt_install_kimi, kimi_config_path, generate_kimi_config, build_kimi_args, exec_kimi, build_launch_command Kimi arm)

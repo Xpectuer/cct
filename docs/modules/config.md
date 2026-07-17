@@ -3,13 +3,13 @@ doc_type: module
 module_name: "config"
 module_path: "src/config.rs"
 generated_by: mci-phase-2
-revision: 4
-updated: 2026-03-15
+revision: 5
+updated: 2026-07-17
 ---
 
 # config Module Documentation
 
-> **Purpose**: Deserializes `profiles.toml` into typed Rust structs via `serde`/`toml`, bootstraps a default config file on first run, resolves the config path, validates profile field combinations, and writes new profiles for both Claude and Codex backends.
+> **Purpose**: Deserializes `profiles.toml` into typed Rust structs via `serde`/`toml`, bootstraps a default config file on first run, resolves the config path, validates profile field combinations, and writes new profiles for the Claude, Codex, and Kimi backends.
 > **Path**: `src/config.rs`
 
 ---
@@ -19,10 +19,11 @@ updated: 2026-03-15
 
 ### Exported Types
 
-- `enum Backend` — discriminates the two supported launch backends:
+- `enum Backend` — discriminates the three supported launch backends:
   - `Claude` (default, via `#[derive(Default)]`) — profiles launched with the `claude` CLI.
   - `Codex` — profiles launched with the `codex` CLI.
-  - Attributes: `#[serde(rename_all = "lowercase")]` so TOML uses `backend = "claude"` / `"codex"`.
+  - `Kimi` — profiles launched with the `kimi` CLI (Kimi Code).
+  - Attributes: `#[serde(rename_all = "lowercase")]` so TOML uses `backend = "claude"` / `"codex"` / `"kimi"`.
   - Derives: `Debug`, `Default`, `Deserialize`, `Clone`, `PartialEq`.
 
 - `struct Profile` — Represents one launch profile loaded from TOML. All fields except `name` are optional:
@@ -35,7 +36,8 @@ updated: 2026-03-15
   - `extra_args: Option<Vec<String>>` — Additional CLI arguments appended verbatim.
   - `skip_permissions: Option<bool>` — Claude-only. When `true`, adds `--dangerously-skip-permissions`.
   - `auth_type: Option<String>` — Claude only. When `"token"`, uses `ANTHROPIC_AUTH_TOKEN` env var. Default `None` means `ANTHROPIC_API_KEY`.
-  - `model: Option<String>` — Passed via `--model` for Claude; via `config.toml` for Codex.
+  - `model: Option<String>` — Passed via `--model` for Claude; via `config.toml` for Codex; via `-m <name>/<model>` for Kimi.
+  - `max_context_size: Option<String>` — Kimi-only (`#[serde(default)]`). `"1m"` (1,000,000) or `"260k"` (262,144); `None` means auto-detect from the model (`k3*` → `1m`, otherwise `260k`). Toggled with the `Space` key.
   - Derives: `Debug`, `Deserialize`, `Clone`.
 
 - `struct NewProfile` — Input type for creating a new profile via `append_profile`. All fields except `name` are optional:
@@ -47,6 +49,7 @@ updated: 2026-03-15
   - `model: Option<String>` — For Claude: `model =` field + 5 model alias env vars. For Codex: `model =` field only (no env vars).
   - `backend: Backend` — Which backend this profile targets.
   - `full_auto: Option<bool>` — Codex-only. Written as `full_auto =` in the profile block.
+  - `max_context_size: Option<String>` — Kimi-only. Written as `max_context_size = "1m"|"260k"` in the profile block when set.
 
 ### Exported Functions
 
@@ -63,9 +66,12 @@ updated: 2026-03-15
 
 - `validate_profiles(profiles: &[Profile]) -> Result<()>`
   - Called immediately after deserialization inside `load_profiles()`.
-  - Rejects two illegal combinations:
+  - Rejects illegal combinations:
     - `backend == Codex && skip_permissions == Some(true)` — codex does not have a skip-permissions flag.
     - `backend == Claude && full_auto == Some(true)` — full_auto is codex-only.
+    - `backend == Kimi && skip_permissions == Some(true)` — kimi does not have a skip-permissions flag.
+    - `backend == Kimi && full_auto.is_some()` — full_auto is codex-only.
+    - `backend == Kimi && auth_type.is_some()` — kimi always uses `ANTHROPIC_API_KEY`.
   - Returns `Err` with a descriptive message naming the offending profile on first violation found.
 
 - `load_profiles() -> Result<Vec<Profile>>`
@@ -82,8 +88,19 @@ updated: 2026-03-15
   - **Backend-specific behaviour**:
     - Claude: `base_url` → `ANTHROPIC_BASE_URL`; `api_key` → `ANTHROPIC_API_KEY`; `model` → `ANTHROPIC_MODEL` + 4 alias vars + `API_TIMEOUT_MS` + `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`.
     - Codex: `base_url` written as profile-level `base_url =` field (not in env); `full_auto` written as `full_auto =` field; only `OPENAI_API_KEY` goes into `[profiles.env]`.
-    - `backend = "codex"` is written explicitly; `backend = "claude"` is omitted (it is the serde default).
+    - Kimi: only `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, and `ANTHROPIC_MODEL` go into `[profiles.env]` (no Claude-specific aliases, no timeouts); `max_context_size` written as a profile-level field when set.
+    - `backend = "codex"` / `"kimi"` is written explicitly; `backend = "claude"` is omitted (it is the serde default).
   - Reads then appends (never rewrites) the config file to preserve comments and ordering.
+
+- `ensure_kimi_profile() -> Result<()>`
+  - If no `Backend::Kimi` profile exists, appends a `default-kimi` profile (`model = "kimi-k2"`, `base_url = "https://api.kimi.com/v1"`).
+  - Mirrors `ensure_codex_profile()`; called from `main` at startup (errors ignored, non-fatal).
+
+- `default_max_context_size(model: Option<&str>) -> &'static str`
+  - Pure helper: model starting with `k3` → `"1m"`, anything else (including `None`) → `"260k"`.
+
+- `resolve_max_context_size(size: Option<&str>) -> u64`
+  - Pure helper: `Some("1m")` → `1_000_000`, anything else → `262_144`. Used by `launch::generate_kimi_config`.
 
 - `toggle_skip_permissions(profile_name: &str, new_value: bool) -> Result<()>`
   - Surgically updates the `skip_permissions` field of the named profile using `toml_edit::DocumentMut`.
@@ -95,6 +112,12 @@ updated: 2026-03-15
   - Renames the env var key and sets/removes the `auth_type = "token"` field using `toml_edit::DocumentMut`.
   - Does nothing to the key value — only renames the env var name.
   - Bound to `t` key in the TUI. Equivalent CLI: `cct add --auth-type token` for new profiles.
+
+- `toggle_kimi_max_context_size(profile_name: &str) -> Result<()>`
+  - Flips the `max_context_size` field of the named Kimi profile between `"1m"` and `"260k"`.
+  - Computes the current effective value (explicit field, else the model-based default from `default_max_context_size`) and writes the opposite explicit value.
+  - Surgical `toml_edit::DocumentMut` edit — preserves comments, whitespace, and key ordering.
+  - Bound to the `Space` key in the TUI (Kimi tab only); callers reload the profile in place after a successful return.
 
 ### Private Constants
 
@@ -112,9 +135,8 @@ updated: 2026-03-15
 
 - **`serde`** (feature `derive`) — Provides the `Deserialize` derive macro applied to `Profile` and `Config`. No `Serialize` is used; config is read-only from Rust's perspective.
 - **`toml`** — `toml::from_str::<Config>(&content)` performs the TOML-to-struct deserialization.
-- **`toml_edit`** — `toml_edit::DocumentMut` is used by `toggle_skip_permissions` for surgical
-  in-place edits that preserve comments and formatting. Only this function uses `toml_edit`;
-  read paths continue to use the simpler `toml` crate.
+- **`toml_edit`** — `toml_edit::DocumentMut` is used by the toggle functions (`toggle_skip_permissions`, `toggle_auth_type`, `toggle_codex_auth_type`, `toggle_full_auto`, `toggle_kimi_max_context_size`) and by `update_profile` for surgical
+  in-place edits that preserve comments and formatting. Read paths continue to use the simpler `toml` crate.
 - **`anyhow`** — `anyhow::Result` and the `.with_context(|| ...)` combinator are used for all error propagation, giving callers human-readable error chains.
 - **`dirs`** — `dirs::config_dir()` maps to the OS-appropriate XDG config directory (`~/.config` on Linux, `~/Library/Application Support` on macOS). Falls back to `PathBuf::from("~/.config")` if `dirs` returns `None`.
 
@@ -264,4 +286,4 @@ fn main() -> anyhow::Result<()> {
 ---
 
 **Template Version**: 2.0
-**Last Updated**: 2026-03-15 (revision 4 — added Backend enum, base_url/full_auto fields, validate_profiles, codex-specific append_profile logic)
+**Last Updated**: 2026-07-17 (revision 5 — added `Backend::Kimi`, `max_context_size` fields, `ensure_kimi_profile`, `default_max_context_size`/`resolve_max_context_size`, `toggle_kimi_max_context_size`, Kimi validate/append rules)

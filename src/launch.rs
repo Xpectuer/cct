@@ -1,7 +1,12 @@
 use crate::config::Profile;
 use anyhow::{Context, Result};
 use crossterm::{execute, terminal::LeaveAlternateScreen};
-use std::{env, fs, io, os::unix::process::CommandExt, path::Path, process::Command};
+use std::{
+    env, fs, io,
+    os::unix::process::CommandExt,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 /// Default environment variables injected before launching Claude.
 /// These mirror the privacy/telemetry defaults commonly set in
@@ -53,12 +58,14 @@ pub fn build_args(profile: &Profile, with_continue: bool) -> Vec<String> {
 }
 
 /// Return the binary name and argument list for launching a profile.
-/// Dispatches by `profile.backend`: Claude uses `build_args`, Codex uses `build_codex_args`.
-/// The `with_continue` flag only applies to Claude (ignored for Codex).
+/// Dispatches by `profile.backend`: Claude uses `build_args`, Codex uses
+/// `build_codex_args`, Kimi uses `build_kimi_args`.
+/// The `with_continue` flag only applies to Claude (ignored for Codex/Kimi).
 pub fn build_launch_command(profile: &Profile, with_continue: bool) -> (String, Vec<String>) {
     match profile.backend {
         crate::config::Backend::Claude => ("claude".into(), build_args(profile, with_continue)),
         crate::config::Backend::Codex => ("codex".into(), build_codex_args(profile)),
+        crate::config::Backend::Kimi => ("kimi".into(), build_kimi_args(profile)),
     }
 }
 
@@ -80,6 +87,17 @@ pub fn exec_claude(profile: &Profile, with_continue: bool) -> anyhow::Error {
 pub fn check_codex_installed() -> bool {
     Command::new("which")
         .arg("codex")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Check if `kimi` is available in PATH.
+pub fn check_kimi_installed() -> bool {
+    Command::new("which")
+        .arg("kimi")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
@@ -366,6 +384,255 @@ pub fn prompt_install() -> Result<()> {
     anyhow::bail!("Installation completed but `claude` not found in PATH.\nAdd ~/.local/bin to your PATH and restart your shell.")
 }
 
+/// Prompt user to install Kimi Code CLI via the official installer script.
+/// Must be called BEFORE entering raw mode / alternate screen.
+/// Returns Ok(()) on successful install, Err on failure or user decline.
+pub fn prompt_install_kimi() -> Result<()> {
+    use std::io::{BufRead, Write};
+
+    println!("Kimi Code CLI not found in PATH.");
+    print!("Install now? [Y/n] ");
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().lock().read_line(&mut input)?;
+    let trimmed = input.trim().to_lowercase();
+
+    if trimmed == "n" || trimmed == "no" {
+        println!("\nTo install manually, run:");
+        println!("  curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash");
+        std::process::exit(0);
+    }
+
+    println!("\nInstalling Kimi Code CLI...\n");
+    let status = Command::new("bash")
+        .arg("-c")
+        .arg("curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash")
+        .status()
+        .context("failed to run installer")?;
+
+    if !status.success() {
+        anyhow::bail!(
+            "Installation failed (exit code: {:?}). Install manually:\n  curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash",
+            status.code()
+        );
+    }
+
+    if check_kimi_installed() {
+        println!("\nKimi Code CLI installed successfully.");
+        return Ok(());
+    }
+
+    let home = dirs::home_dir().unwrap_or_default();
+    let fallback = home.join(".local/bin/kimi");
+    if fallback.exists() {
+        println!("\nKimi Code CLI installed at {}.", fallback.display());
+        println!("Note: You may need to add ~/.local/bin to your PATH.");
+        return Ok(());
+    }
+
+    anyhow::bail!("Installation completed but `kimi` not found in PATH.\nAdd ~/.local/bin to your PATH and restart your shell.")
+}
+
+/// Path to the Kimi Code CLI config file. Honors the `CCT_KIMI_CONFIG`
+/// override (mirrors `config_path()`'s `CCT_CONFIG`) so tests never touch
+/// the real `~/.kimi-code/config.toml`.
+pub fn kimi_config_path() -> PathBuf {
+    if let Ok(p) = env::var("CCT_KIMI_CONFIG") {
+        return PathBuf::from(p);
+    }
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("~"))
+        .join(".kimi-code")
+        .join("config.toml")
+}
+
+/// Normalize a base_url for the kimi config: ensure an `https://` scheme,
+/// ensure a `/v1` suffix, and collapse duplicate slashes after the scheme
+/// (the naive `append "/v1"` approach produces bugs like `coding//v1`).
+fn normalize_kimi_base_url(raw: &str) -> String {
+    let mut url = raw.trim().to_string();
+    if url.is_empty() {
+        return url;
+    }
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        url = format!("https://{url}");
+    }
+    if !url.ends_with("/v1") {
+        url = format!("{url}/v1");
+    }
+    if let Some(scheme_end) = url.find("://") {
+        let (scheme, rest) = url.split_at(scheme_end + 3);
+        let mut collapsed = String::with_capacity(rest.len());
+        let mut last_was_slash = false;
+        for c in rest.chars() {
+            if c == '/' {
+                if !last_was_slash {
+                    collapsed.push(c);
+                }
+                last_was_slash = true;
+            } else {
+                collapsed.push(c);
+                last_was_slash = false;
+            }
+        }
+        url = format!("{scheme}{collapsed}");
+    }
+    url
+}
+
+/// Surgically write this profile's provider/model entries into the Kimi
+/// Code CLI config (`~/.kimi-code/config.toml`). All pre-existing tables
+/// (e.g. `managed:kimi-code` providers created by `kimi login`, `services.*`,
+/// `default_model`, `thinking`) are preserved.
+pub fn generate_kimi_config(profile: &Profile) -> Result<()> {
+    let path = kimi_config_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create kimi config dir {parent:?}"))?;
+    }
+    let content = fs::read_to_string(&path).unwrap_or_default();
+    let mut doc = content
+        .parse::<toml_edit::DocumentMut>()
+        .with_context(|| format!("parse TOML in {path:?}"))?;
+
+    let env_map = profile.env.as_ref();
+    let env_get = |key: &str| env_map.and_then(|m| m.get(key)).map(String::as_str);
+
+    let provider_id = profile.name.as_str();
+    let base_url = profile
+        .base_url
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .or_else(|| env_get("ANTHROPIC_BASE_URL"))
+        .map(normalize_kimi_base_url)
+        .unwrap_or_default();
+    let api_key = env_get("ANTHROPIC_AUTH_TOKEN")
+        .or_else(|| env_get("ANTHROPIC_API_KEY"))
+        .unwrap_or_default();
+
+    // [providers."<id>"] — parent table is implicit so no bare `[providers]`
+    // header is emitted (matches the kimi CLI's own config layout).
+    if !matches!(doc.get("providers"), Some(toml_edit::Item::Table(_))) {
+        let mut t = toml_edit::Table::new();
+        t.set_implicit(true);
+        doc["providers"] = toml_edit::Item::Table(t);
+    }
+    let providers = doc["providers"]
+        .as_table_mut()
+        .expect("providers item should be a table");
+    let provider = providers
+        .entry(provider_id)
+        .or_insert(toml_edit::Item::Table(toml_edit::Table::new()));
+    let provider_table = provider
+        .as_table_mut()
+        .expect("provider entry should be a table");
+    provider_table["type"] = toml_edit::value("kimi");
+    provider_table["base_url"] = toml_edit::value(base_url.as_str());
+    provider_table["api_key"] = toml_edit::value(api_key);
+
+    // [models."<id>/<model>"] — skipped when the profile has no model.
+    let model = profile
+        .model
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .or_else(|| env_get("ANTHROPIC_MODEL"))
+        .map(str::to_string);
+    if let Some(model) = model {
+        if !matches!(doc.get("models"), Some(toml_edit::Item::Table(_))) {
+            let mut t = toml_edit::Table::new();
+            t.set_implicit(true);
+            doc["models"] = toml_edit::Item::Table(t);
+        }
+        let models = doc["models"]
+            .as_table_mut()
+            .expect("models item should be a table");
+        let model_key = format!("{provider_id}/{model}");
+        let model_entry = models
+            .entry(&model_key)
+            .or_insert(toml_edit::Item::Table(toml_edit::Table::new()));
+        let model_table = model_entry
+            .as_table_mut()
+            .expect("model entry should be a table");
+        model_table["provider"] = toml_edit::value(provider_id);
+        model_table["model"] = toml_edit::value(model.as_str());
+        let max_context_size =
+            crate::config::resolve_max_context_size(profile.max_context_size.as_deref().or(Some(
+                crate::config::default_max_context_size(Some(model.as_str())),
+            )));
+        model_table["max_context_size"] = toml_edit::value(max_context_size as i64);
+        let mut capabilities = toml_edit::Array::new();
+        for cap in [
+            "thinking",
+            "always_thinking",
+            "image_in",
+            "video_in",
+            "tool_use",
+        ] {
+            capabilities.push(cap);
+        }
+        model_table["capabilities"] = toml_edit::value(capabilities);
+        model_table["display_name"] = toml_edit::value(model.to_uppercase());
+        if model.starts_with("k3") {
+            let mut efforts = toml_edit::Array::new();
+            efforts.push("max");
+            model_table["support_efforts"] = toml_edit::value(efforts);
+            model_table["default_effort"] = toml_edit::value("max");
+        } else {
+            // Keep re-generation correct after a model change away from k3*.
+            model_table.remove("support_efforts");
+            model_table.remove("default_effort");
+        }
+    }
+
+    fs::write(&path, doc.to_string()).with_context(|| format!("write kimi config {path:?}"))?;
+    Ok(())
+}
+
+/// Build the CLI argument list for `kimi` from a profile. Pure — no side effects.
+pub fn build_kimi_args(profile: &Profile) -> Vec<String> {
+    let mut args = Vec::new();
+    let model = profile
+        .model
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            profile
+                .env
+                .as_ref()
+                .and_then(|m| m.get("ANTHROPIC_MODEL"))
+                .map(String::as_str)
+        });
+    if let Some(model) = model {
+        args.push("-m".to_string());
+        args.push(format!("{}/{model}", profile.name));
+    }
+    if let Some(extra) = &profile.extra_args {
+        args.extend(extra.iter().cloned());
+    }
+    args
+}
+
+/// Write the kimi config entries for `profile`, inject its env vars, and
+/// exec-replace the current process with `kimi`. Returns only on error.
+pub fn exec_kimi(profile: &Profile) -> anyhow::Error {
+    if !check_kimi_installed() {
+        return anyhow::anyhow!(
+            "kimi CLI not found in PATH. Install it first: curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash"
+        );
+    }
+    if let Err(e) = generate_kimi_config(profile) {
+        return anyhow::anyhow!("failed to write kimi config: {e:#}");
+    }
+    if let Some(env_map) = &profile.env {
+        for (k, v) in env_map {
+            env::set_var(k, v);
+        }
+    }
+    let args = build_kimi_args(profile);
+    let err = Command::new("kimi").args(&args).exec();
+    anyhow::anyhow!("exec kimi: {err}")
+}
+
 /// Suspend TUI, open $EDITOR (or vi) on path, block until editor exits.
 pub fn open_editor(path: &Path) -> Result<()> {
     let editor = env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
@@ -394,6 +661,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: None,
+            max_context_size: None,
         }
     }
 
@@ -488,6 +756,7 @@ mod tests {
             base_url: base_url.map(Into::into),
             full_auto,
             auth_type: None,
+            max_context_size: None,
         }
     }
 
@@ -637,5 +906,314 @@ mod tests {
                 None => env::remove_var(k),
             }
         }
+    }
+
+    // --- Kimi tests ---
+
+    fn kimi_profile(
+        name: &str,
+        model: Option<&str>,
+        base_url: Option<&str>,
+        max_context_size: Option<&str>,
+    ) -> Profile {
+        Profile {
+            name: name.into(),
+            description: None,
+            env: None,
+            model: model.map(Into::into),
+            skip_permissions: None,
+            extra_args: None,
+            backend: crate::config::Backend::Kimi,
+            base_url: base_url.map(Into::into),
+            full_auto: None,
+            auth_type: None,
+            max_context_size: max_context_size.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn build_kimi_args_model() {
+        let p = kimi_profile("my-kimi", Some("kimi-k2"), None, None);
+        assert_eq!(build_kimi_args(&p), vec!["-m", "my-kimi/kimi-k2"]);
+    }
+
+    #[test]
+    fn build_kimi_args_no_model_extra_only() {
+        let mut p = kimi_profile("my-kimi", None, None, None);
+        p.extra_args = Some(vec!["--verbose".into()]);
+        assert_eq!(build_kimi_args(&p), vec!["--verbose"]);
+    }
+
+    #[test]
+    fn build_kimi_args_model_and_extra() {
+        let mut p = kimi_profile("my-kimi", Some("k3"), None, None);
+        p.extra_args = Some(vec!["--verbose".into()]);
+        assert_eq!(build_kimi_args(&p), vec!["-m", "my-kimi/k3", "--verbose"]);
+    }
+
+    #[test]
+    fn build_kimi_args_model_from_env_fallback() {
+        let mut p = kimi_profile("my-kimi", None, None, None);
+        p.env = Some(std::collections::HashMap::from([(
+            "ANTHROPIC_MODEL".into(),
+            "kimi-k2".into(),
+        )]));
+        assert_eq!(build_kimi_args(&p), vec!["-m", "my-kimi/kimi-k2"]);
+    }
+
+    #[test]
+    fn build_launch_command_dispatches_kimi() {
+        let p = kimi_profile("my-kimi", Some("kimi-k2"), None, None);
+        let (bin, args) = build_launch_command(&p, false);
+        assert_eq!(bin, "kimi");
+        assert_eq!(args, vec!["-m", "my-kimi/kimi-k2"]);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn kimi_config_path_honors_override() {
+        std::env::set_var("CCT_KIMI_CONFIG", "/tmp/cct-test-kimi-config.toml");
+        assert_eq!(
+            kimi_config_path(),
+            PathBuf::from("/tmp/cct-test-kimi-config.toml")
+        );
+        std::env::remove_var("CCT_KIMI_CONFIG");
+    }
+
+    #[test]
+    fn normalize_kimi_base_url_cases() {
+        assert_eq!(
+            normalize_kimi_base_url("https://api.kimi.com/v1"),
+            "https://api.kimi.com/v1"
+        );
+        assert_eq!(
+            normalize_kimi_base_url("api.kimi.com"),
+            "https://api.kimi.com/v1"
+        );
+        assert_eq!(
+            normalize_kimi_base_url("https://api.kimi.com"),
+            "https://api.kimi.com/v1"
+        );
+        assert_eq!(
+            normalize_kimi_base_url("https://x.com/coding/"),
+            "https://x.com/coding/v1"
+        );
+        assert_eq!(
+            normalize_kimi_base_url("https://x.com/coding//v1"),
+            "https://x.com/coding/v1"
+        );
+        assert_eq!(normalize_kimi_base_url(""), "");
+    }
+
+    fn read_kimi_doc(path: &std::path::Path) -> toml_edit::DocumentMut {
+        std::fs::read_to_string(path).unwrap().parse().unwrap()
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn generate_kimi_config_writes_provider_and_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested").join("config.toml");
+        std::env::set_var("CCT_KIMI_CONFIG", &path);
+
+        let mut p = kimi_profile(
+            "my-kimi",
+            Some("kimi-k2"),
+            Some("https://api.kimi.com"),
+            None,
+        );
+        p.env = Some(std::collections::HashMap::from([(
+            "ANTHROPIC_API_KEY".into(),
+            "sk-kimi".into(),
+        )]));
+        generate_kimi_config(&p).unwrap();
+
+        let doc = read_kimi_doc(&path);
+        let provider = &doc["providers"]["my-kimi"];
+        assert_eq!(provider["type"].as_str(), Some("kimi"));
+        assert_eq!(
+            provider["base_url"].as_str(),
+            Some("https://api.kimi.com/v1")
+        );
+        assert_eq!(provider["api_key"].as_str(), Some("sk-kimi"));
+
+        let model = &doc["models"]["my-kimi/kimi-k2"];
+        assert_eq!(model["provider"].as_str(), Some("my-kimi"));
+        assert_eq!(model["model"].as_str(), Some("kimi-k2"));
+        assert_eq!(model["max_context_size"].as_integer(), Some(262_144));
+        assert_eq!(model["display_name"].as_str(), Some("KIMI-K2"));
+        let caps: Vec<&str> = model["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(
+            caps,
+            [
+                "thinking",
+                "always_thinking",
+                "image_in",
+                "video_in",
+                "tool_use"
+            ]
+        );
+        assert!(model.get("support_efforts").is_none());
+        assert!(model.get("default_effort").is_none());
+
+        std::env::remove_var("CCT_KIMI_CONFIG");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn generate_kimi_config_k3_writes_effort_and_1m() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::env::set_var("CCT_KIMI_CONFIG", &path);
+
+        let p = kimi_profile("my-kimi", Some("k3"), None, None);
+        generate_kimi_config(&p).unwrap();
+
+        let doc = read_kimi_doc(&path);
+        let model = &doc["models"]["my-kimi/k3"];
+        assert_eq!(model["max_context_size"].as_integer(), Some(1_000_000));
+        assert_eq!(model["display_name"].as_str(), Some("K3"));
+        let efforts: Vec<&str> = model["support_efforts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(efforts, ["max"]);
+        assert_eq!(model["default_effort"].as_str(), Some("max"));
+
+        std::env::remove_var("CCT_KIMI_CONFIG");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn generate_kimi_config_explicit_max_context_size_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::env::set_var("CCT_KIMI_CONFIG", &path);
+
+        // Explicit "1m" on a non-k3 model → 1000000
+        let p = kimi_profile("kimi-a", Some("kimi-k2"), None, Some("1m"));
+        generate_kimi_config(&p).unwrap();
+        // Explicit "260k" on a k3 model → 262144
+        let p = kimi_profile("kimi-b", Some("k3"), None, Some("260k"));
+        generate_kimi_config(&p).unwrap();
+
+        let doc = read_kimi_doc(&path);
+        assert_eq!(
+            doc["models"]["kimi-a/kimi-k2"]["max_context_size"].as_integer(),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            doc["models"]["kimi-b/k3"]["max_context_size"].as_integer(),
+            Some(262_144)
+        );
+
+        std::env::remove_var("CCT_KIMI_CONFIG");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn generate_kimi_config_preserves_existing_tables() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"default_model = "kimi-code/k3"
+
+[providers."managed:kimi-code"]
+type = "kimi"
+api_key = ""
+base_url = "https://api.kimi.com/coding/v1"
+
+[providers."managed:kimi-code".oauth]
+storage = "file"
+key = "oauth/kimi-code"
+
+[services.moonshot_search]
+base_url = "https://api.kimi.com/coding/v1/search"
+api_key = ""
+
+[thinking]
+enabled = true
+effort = "max"
+"#,
+        )
+        .unwrap();
+        std::env::set_var("CCT_KIMI_CONFIG", &path);
+
+        let p = kimi_profile("my-kimi", Some("kimi-k2"), Some("api.kimi.com"), None);
+        generate_kimi_config(&p).unwrap();
+
+        let doc = read_kimi_doc(&path);
+        // Pre-existing tables survive untouched
+        assert_eq!(doc["default_model"].as_str(), Some("kimi-code/k3"));
+        let managed = &doc["providers"]["managed:kimi-code"];
+        assert_eq!(
+            managed["base_url"].as_str(),
+            Some("https://api.kimi.com/coding/v1")
+        );
+        assert_eq!(managed["oauth"]["storage"].as_str(), Some("file"));
+        assert_eq!(
+            doc["services"]["moonshot_search"]["base_url"].as_str(),
+            Some("https://api.kimi.com/coding/v1/search")
+        );
+        assert_eq!(doc["thinking"]["enabled"].as_bool(), Some(true));
+        // New provider got scheme + /v1 normalization
+        assert_eq!(
+            doc["providers"]["my-kimi"]["base_url"].as_str(),
+            Some("https://api.kimi.com/v1")
+        );
+
+        std::env::remove_var("CCT_KIMI_CONFIG");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn generate_kimi_config_regeneration_removes_effort_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::env::set_var("CCT_KIMI_CONFIG", &path);
+
+        let p = kimi_profile("my-kimi", Some("k3"), None, None);
+        generate_kimi_config(&p).unwrap();
+        // Same provider, model changed away from k3*
+        let p = kimi_profile("my-kimi", Some("kimi-k2"), None, None);
+        generate_kimi_config(&p).unwrap();
+
+        let doc = read_kimi_doc(&path);
+        let model = &doc["models"]["my-kimi/kimi-k2"];
+        assert!(model.get("support_efforts").is_none());
+        assert!(model.get("default_effort").is_none());
+        assert_eq!(model["max_context_size"].as_integer(), Some(262_144));
+        // The old k3 model entry is left as-is (different model table)
+        assert_eq!(
+            doc["models"]["my-kimi/k3"]["default_effort"].as_str(),
+            Some("max")
+        );
+
+        std::env::remove_var("CCT_KIMI_CONFIG");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn generate_kimi_config_no_model_skips_models_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::env::set_var("CCT_KIMI_CONFIG", &path);
+
+        let p = kimi_profile("my-kimi", None, Some("https://api.kimi.com/v1"), None);
+        generate_kimi_config(&p).unwrap();
+
+        let doc = read_kimi_doc(&path);
+        assert_eq!(doc["providers"]["my-kimi"]["type"].as_str(), Some("kimi"));
+        assert!(doc.get("models").is_none());
+
+        std::env::remove_var("CCT_KIMI_CONFIG");
     }
 }

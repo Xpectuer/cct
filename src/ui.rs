@@ -20,10 +20,11 @@ pub fn mask_value<'a>(key: &str, val: &'a str) -> &'a str {
     }
 }
 
-/// Build a tab bar showing `[Claude]` and `[Codex]` with the active tab highlighted.
+/// Build a tab bar showing `[Claude]`, `[Codex]`, `[Kimi]` with the active tab highlighted.
 pub fn build_tab_bar(active: &Backend) -> Vec<Line<'static>> {
     let claude_label = "[Claude]";
     let codex_label = "[Codex]";
+    let kimi_label = "[Kimi]";
     let active_style = Style::default()
         .fg(Color::White)
         .bg(Color::Blue)
@@ -46,11 +47,21 @@ pub fn build_tab_bar(active: &Backend) -> Vec<Line<'static>> {
             inactive_style
         },
     );
+    let kimi_span = ratatui::text::Span::styled(
+        kimi_label,
+        if *active == Backend::Kimi {
+            active_style
+        } else {
+            inactive_style
+        },
+    );
 
     vec![Line::from(vec![
         claude_span,
         ratatui::text::Span::raw("  "),
         codex_span,
+        ratatui::text::Span::raw("  "),
+        kimi_span,
     ])]
 }
 
@@ -73,10 +84,13 @@ fn confirmation_prompt(form: &FormState) -> &'static str {
 fn normal_footer_text(backend: &Backend) -> &'static str {
     match backend {
         Backend::Claude => {
-            " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [c] Resume  [s] Skip-perms  [t] Auth  [a] Add  [d] Duplicate  [e] Edit  [q] Quit"
+            " [Tab/1/2/3] Backend  [↑↓/jk] Navigate  [Enter] Launch  [c] Resume  [s] Skip-perms  [t] Auth  [a] Add  [d] Duplicate  [e] Edit  [q] Quit"
         }
         Backend::Codex => {
-            " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [s] Approval  [t] Auth  [a] Add  [d] Duplicate  [e] Edit  [q] Quit"
+            " [Tab/1/2/3] Backend  [↑↓/jk] Navigate  [Enter] Launch  [s] Approval  [t] Auth  [a] Add  [d] Duplicate  [e] Edit  [q] Quit"
+        }
+        Backend::Kimi => {
+            " [Tab/1/2/3] Backend  [↑↓/jk] Navigate  [Enter] Launch  [Space] Context  [a] Add  [d] Duplicate  [e] Edit  [q] Quit"
         }
     }
 }
@@ -235,6 +249,19 @@ fn build_detail(profile: &Profile) -> Vec<Line<'static>> {
             if profile.auth_type.as_deref() == Some("subscription") {
                 lines.push(Line::from("auth: subscription"));
             }
+        }
+        Backend::Kimi => {
+            let effective = profile.max_context_size.clone().unwrap_or_else(|| {
+                let model = profile.model.as_deref().or_else(|| {
+                    profile
+                        .env
+                        .as_ref()
+                        .and_then(|m| m.get("ANTHROPIC_MODEL"))
+                        .map(String::as_str)
+                });
+                format!("auto ({})", crate::config::default_max_context_size(model))
+            });
+            lines.push(Line::from(format!("max_context_size: {effective}")));
         }
     }
     if let Some(extra) = &profile.extra_args {
@@ -432,7 +459,7 @@ mod tests {
         assert!(claude_footer.contains("[t] Auth"));
         assert!(claude_footer.contains("[c] Resume"));
         assert!(claude_footer.contains("[e] Edit"));
-        assert!(claude_footer.contains("[Tab/1/2] Backend"));
+        assert!(claude_footer.contains("[Tab/1/2/3] Backend"));
         assert_eq!(claude_footer.matches("[e] Edit").count(), 1);
 
         let codex_footer = normal_footer_text(&Backend::Codex);
@@ -441,11 +468,37 @@ mod tests {
         assert!(codex_footer.contains("[s] Approval"));
         assert!(codex_footer.contains("[t] Auth"));
         assert!(codex_footer.contains("[e] Edit"));
+        assert!(codex_footer.contains("[Tab/1/2/3] Backend"));
         assert!(
             !codex_footer.contains("[c] Resume"),
             "Codex footer should not show Resume"
         );
         assert_eq!(codex_footer.matches("[e] Edit").count(), 1);
+    }
+
+    /// Every new key binding needs a footer hint: the Kimi tab must show the
+    /// [Space] max_context_size toggle, and must not offer Claude/Codex-only
+    /// toggles ([c] Resume, [s], [t]).
+    #[test]
+    fn kimi_footer_shows_space_context_hint() {
+        let kimi_footer = normal_footer_text(&Backend::Kimi);
+        assert!(kimi_footer.contains("[Space] Context"));
+        assert!(kimi_footer.contains("[Tab/1/2/3] Backend"));
+        assert!(kimi_footer.contains("[a] Add"));
+        assert!(kimi_footer.contains("[d] Duplicate"));
+        assert!(kimi_footer.contains("[e] Edit"));
+        assert!(
+            !kimi_footer.contains("[c] Resume"),
+            "Kimi footer should not show Resume"
+        );
+        assert!(
+            !kimi_footer.contains("[s]"),
+            "Kimi footer should not show an [s] toggle"
+        );
+        assert!(
+            !kimi_footer.contains("[t]"),
+            "Kimi footer should not show an [t] toggle"
+        );
     }
 
     #[test]
@@ -471,37 +524,26 @@ mod tests {
     fn tab_bar_renders_with_active_highlight() {
         use crate::config::Backend;
 
-        // Claude active
-        let lines = build_tab_bar(&Backend::Claude);
-        let text: String = lines
-            .iter()
-            .map(|l| l.to_string())
-            .collect::<Vec<_>>()
-            .join("");
-        assert!(
-            text.contains("[Claude]"),
-            "Expected [Claude] in tab bar, got: {text}"
-        );
-        assert!(
-            text.contains("[Codex]"),
-            "Expected [Codex] in tab bar, got: {text}"
-        );
-
-        // Codex active
-        let lines = build_tab_bar(&Backend::Codex);
-        let text: String = lines
-            .iter()
-            .map(|l| l.to_string())
-            .collect::<Vec<_>>()
-            .join("");
-        assert!(
-            text.contains("[Claude]"),
-            "Expected [Claude] in tab bar, got: {text}"
-        );
-        assert!(
-            text.contains("[Codex]"),
-            "Expected [Codex] in tab bar, got: {text}"
-        );
+        for active in [Backend::Claude, Backend::Codex, Backend::Kimi] {
+            let lines = build_tab_bar(&active);
+            let text: String = lines
+                .iter()
+                .map(|l| l.to_string())
+                .collect::<Vec<_>>()
+                .join("");
+            assert!(
+                text.contains("[Claude]"),
+                "Expected [Claude] in tab bar, got: {text}"
+            );
+            assert!(
+                text.contains("[Codex]"),
+                "Expected [Codex] in tab bar, got: {text}"
+            );
+            assert!(
+                text.contains("[Kimi]"),
+                "Expected [Kimi] in tab bar, got: {text}"
+            );
+        }
     }
 
     #[test]
@@ -519,6 +561,7 @@ mod tests {
             base_url: Some("https://api.openai.com".into()),
             full_auto: Some(crate::config::ApprovalLevel::Danger),
             auth_type: None,
+            max_context_size: None,
         };
 
         let lines = build_detail(&codex_profile);
@@ -550,6 +593,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: None,
+            max_context_size: None,
         };
 
         let lines = build_detail(&claude_profile);
@@ -581,6 +625,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: None,
+            max_context_size: None,
         };
         // Verify skip_permissions triggers the red-style branch
         assert!(profile.skip_permissions.unwrap_or(false));
@@ -602,6 +647,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: None,
+            max_context_size: None,
         };
         assert!(!safe_profile.skip_permissions.unwrap_or(false));
     }
@@ -722,6 +768,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: Some("token".into()),
+            max_context_size: None,
         };
         let lines = build_detail(&profile);
         let joined: String = lines
@@ -748,6 +795,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: None,
+            max_context_size: None,
         };
         let lines = build_detail(&profile);
         let joined: String = lines
@@ -774,6 +822,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: Some("subscription".into()),
+            max_context_size: None,
         };
         let lines = build_detail(&profile);
         let joined: String = lines
@@ -800,6 +849,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: Some("subscription".into()),
+            max_context_size: None,
         };
         // Verify auth_type is subscription
         assert_eq!(profile.auth_type.as_deref(), Some("subscription"));
@@ -808,5 +858,60 @@ mod tests {
         let styled = item.style(Style::default().fg(Color::DarkGray));
         // Just verify the style was applied without panicking
         let _ = styled;
+    }
+
+    #[test]
+    fn kimi_detail_shows_max_context_size() {
+        use crate::config::Backend;
+
+        // Explicit value shown as-is
+        let explicit = Profile {
+            name: "kimi-explicit".into(),
+            description: None,
+            env: None,
+            model: Some("kimi-k2".into()),
+            skip_permissions: None,
+            extra_args: None,
+            backend: Backend::Kimi,
+            base_url: None,
+            full_auto: None,
+            auth_type: None,
+            max_context_size: Some("260k".into()),
+        };
+        let lines = build_detail(&explicit);
+        let joined: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("max_context_size: 260k"),
+            "Expected explicit max_context_size, got:\n{joined}"
+        );
+
+        // No explicit field: auto-detected from model (k3 → 1m)
+        let auto_k3 = Profile {
+            name: "kimi-auto".into(),
+            description: None,
+            env: None,
+            model: Some("k3".into()),
+            skip_permissions: None,
+            extra_args: None,
+            backend: Backend::Kimi,
+            base_url: None,
+            full_auto: None,
+            auth_type: None,
+            max_context_size: None,
+        };
+        let lines = build_detail(&auto_k3);
+        let joined: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("max_context_size: auto (1m)"),
+            "Expected auto (1m) hint, got:\n{joined}"
+        );
     }
 }

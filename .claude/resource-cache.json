@@ -1,0 +1,142 @@
+[
+  {
+    "kind": "rule",
+    "name": "assert-contracts-not-incidental-platform-strings",
+    "brief": "Verification should target the real platform contract rather than brittle wording or environment-specific text",
+    "action": "read",
+    "path": "docs/rules/assert-contracts-not-incidental-platform-strings.md",
+    "when_to_use": null,
+    "visited": false,
+    "matched": false
+  },
+  {
+    "kind": "rule",
+    "name": "cross-module-features-need-contract-tests",
+    "brief": "Features that span app, ui, config, main, and launch must be verified at the shared contract boundaries",
+    "action": "read",
+    "path": "docs/rules/cross-module-features-need-contract-tests.md",
+    "when_to_use": null,
+    "visited": false,
+    "matched": false
+  },
+  {
+    "kind": "rule",
+    "name": "hotkey-ui-changes-must-be-discoverable",
+    "brief": "Any new interactive key path must update the visible UI hints and ship with coverage for discoverability",
+    "action": "read",
+    "path": "docs/rules/hotkey-ui-changes-must-be-discoverable.md",
+    "when_to_use": null,
+    "visited": false,
+    "matched": false
+  },
+  {
+    "kind": "rule",
+    "name": "kiss",
+    "brief": "Make Both Design Decision and Code Style As Simple/Stupid As Possible",
+    "action": "read",
+    "path": "docs/rules/kiss.md",
+    "when_to_use": null,
+    "visited": false,
+    "matched": false
+  },
+  {
+    "kind": "rule",
+    "name": "mask-secrets-on-every-display-path",
+    "brief": "Any user-visible rendering of secret-like config values must apply the shared masking policy",
+    "action": "read",
+    "path": "docs/rules/mask-secrets-on-every-display-path.md",
+    "when_to_use": null,
+    "visited": false,
+    "matched": false
+  },
+  {
+    "kind": "rule",
+    "name": "preserve-user-edited-config-structure",
+    "brief": "Mutations to user config should preserve comments, formatting, and ordering whenever possible",
+    "action": "read",
+    "path": "docs/rules/preserve-user-edited-config-structure.md",
+    "when_to_use": null,
+    "visited": false,
+    "matched": false
+  },
+  {
+    "kind": "rule",
+    "name": "pure-builders-thin-effectful-edges",
+    "brief": "Keep data shaping pure and isolate I/O, env mutation, terminal changes, and exec in narrow wrappers",
+    "action": "read",
+    "path": "docs/rules/pure-builders-thin-effectful-edges.md",
+    "when_to_use": null,
+    "visited": false,
+    "matched": false
+  },
+  {
+    "kind": "rule",
+    "name": "single-source-of-truth-variant-mappings",
+    "brief": "Runtime-discriminated field/index mappings must be owned by one authoritative function",
+    "action": "read",
+    "path": "docs/rules/single-source-of-truth-variant-mappings.md",
+    "when_to_use": null,
+    "visited": false,
+    "matched": false
+  },
+  {
+    "kind": "rule",
+    "name": "test-boundaries-with-stubs-before-manual-verification",
+    "brief": "External integrations should be made deterministic under test before relying on manual verification",
+    "action": "read",
+    "path": "docs/rules/test-boundaries-with-stubs-before-manual-verification.md",
+    "when_to_use": null,
+    "visited": false,
+    "matched": false
+  },
+  {
+    "kind": "rule",
+    "name": "tui-cli-sync",
+    "brief": "—",
+    "action": "read",
+    "path": "docs/rules/tui-cli-sync.md",
+    "when_to_use": null,
+    "visited": false,
+    "matched": false
+  },
+  {
+    "kind": "rule",
+    "name": "update-docs-after-new-feature",
+    "brief": "—",
+    "action": "read",
+    "path": "docs/rules/update-docs-after-new-feature.md",
+    "when_to_use": null,
+    "visited": false,
+    "matched": false
+  },
+  {
+    "kind": "script",
+    "name": "fm",
+    "brief": "—",
+    "action": "execute",
+    "path": "scripts/fm.sh",
+    "when_to_use": null,
+    "usage": "Run scripts/fm.sh --help for usage",
+    "matched": false
+  },
+  {
+    "kind": "script",
+    "name": "next-steps",
+    "brief": "—",
+    "action": "execute",
+    "path": "scripts/next-steps.sh",
+    "when_to_use": null,
+    "usage": "Run scripts/next-steps.sh --help for usage",
+    "matched": false
+  },
+  {
+    "kind": "script",
+    "name": "validate_config",
+    "brief": "—",
+    "action": "execute",
+    "path": "scripts/validate_config.sh",
+    "when_to_use": null,
+    "usage": "Run scripts/validate_config.sh --help for usage",
+    "matched": false
+  }
+]

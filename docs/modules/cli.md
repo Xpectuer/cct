@@ -3,13 +3,13 @@ doc_type: module
 module_name: "cli"
 module_path: "src/cli.rs"
 generated_by: mci-phase-2
-revision: 2
-updated: 2026-05-11
+revision: 3
+updated: 2026-07-17
 ---
 
 # cli Module Documentation
 
-> **Purpose**: Implements the `cct add` and `cct edit` subcommands. `cct add` runs an interactive 5-prompt CLI flow that collects profile fields, shows a masked summary, and calls `config::append_profile` on user confirmation. `cct edit` directly opens `profiles.toml` in `$EDITOR` (dispatched from `main.rs` via `launch::open_editor`).
+> **Purpose**: Implements the `cct add` and `cct edit` subcommands. `cct add` runs an interactive 6-prompt CLI flow that collects profile fields, shows a masked summary, and calls `config::append_profile` on user confirmation; `--backend claude|codex|kimi` selects the target backend (default claude). `cct edit` directly opens `profiles.toml` in `$EDITOR` (dispatched from `main.rs` via `launch::open_editor`).
 > **Path**: src/cli.rs (add); main.rs — `Some(Commands::Edit)` arm (edit)
 
 ---
@@ -19,13 +19,14 @@ updated: 2026-05-11
 
 ### Exported Functions
 
-- `pub fn run_add(auth_type: Option<String>) -> Result<()>`
-  - Entry point for the `cct add` subcommand; called from `main` when `Commands::Add { auth_type }` is matched.
+- `pub fn run_add(auth_type: Option<String>, backend: Option<String>) -> Result<()>`
+  - Entry point for the `cct add` subcommand; called from `main` when `Commands::Add { auth_type, backend }` is matched.
   - Accepts `--auth-type token` flag to use `ANTHROPIC_AUTH_TOKEN` instead of `ANTHROPIC_API_KEY`.
-  - Delegates to `run_add_with(io::stdin().lock(), io::stdout(), auth_type)`.
+  - Accepts `--backend claude|codex|kimi` flag (case-insensitive, default claude) via `resolve_backend`.
+  - Delegates to `run_add_with(io::stdin().lock(), io::stdout(), auth_type, backend)`.
   - Returns: `anyhow::Result<()>`.
 
-- `pub fn run_add_with<R: BufRead, W: Write>(reader: R, writer: W, auth_type: Option<String>) -> Result<()>`
+- `pub fn run_add_with<R: BufRead, W: Write>(reader: R, writer: W, auth_type: Option<String>, backend: config::Backend) -> Result<()>`
   - Testable, I/O-generic version of the add flow.
   - Accepts any `BufRead` reader and `Write` writer, enabling unit tests to inject fake stdin/stdout without touching real file descriptors.
   - **6-prompt sequence** (in order):
@@ -37,8 +38,12 @@ updated: 2026-05-11
     6. **Fast Model** (optional, for Haiku/SmallFast tier)
   - After prompts: prints a summary table with the API key masked via `mask_key`.
   - Prompts `"Save? (y/n): "` — any response other than `"y"` (case-insensitive) prints `"Cancelled."` and returns `Ok(())`.
-  - On confirmation: calls `config::append_profile(&NewProfile { ..., auth_type })` then prints `"Profile '<name>' added."`.
+  - On confirmation: calls `config::append_profile(&NewProfile { ..., auth_type, backend, max_context_size: None })` then prints `"Profile '<name>' added."`. For Kimi profiles this writes `backend = "kimi"` plus an env block with only `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`; `max_context_size` stays auto (TUI-only field).
   - Returns `Ok(())` on success or user cancellation; `Err` only on I/O failures.
+
+- `pub fn run_pick_profile(profiles: &[Profile]) -> Result<usize>` / `pub fn run_pick_profile_with<R: BufRead, W: Write>(...) -> Result<usize>`
+  - Interactive numbered picker used by `cct env` / `cct run` when no profile name is given.
+  - Each profile line carries a backend tag: `[claude]`, `[codex] `, or `[kimi]  ` (padded to equal width).
 
 ### Private Functions
 
@@ -47,6 +52,10 @@ updated: 2026-05-11
   - If `key.len() <= 8`: returns `"*".repeat(key.len())` (all stars).
   - If `key.len() > 8`: returns `"<first4>...<last4>"` format (e.g., `"sk-1...key4"`).
   - This format gives the user enough visual confirmation to verify the key without exposing it.
+
+- `fn resolve_backend(backend: Option<String>) -> Result<config::Backend>`
+  - Parses the `--backend` flag: `None` → `Claude` (default); `"claude"` / `"codex"` / `"kimi"` (case-insensitive) → the matching variant.
+  - Returns `Err("Unknown backend: '<x>'. Expected one of: claude, codex, kimi")` for anything else.
 <!-- END:interface -->
 
 ---

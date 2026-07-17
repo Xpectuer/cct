@@ -9,6 +9,24 @@ pub enum Backend {
     #[default]
     Claude,
     Codex,
+    Kimi,
+}
+
+/// Default max_context_size for Kimi profiles. Auto-detected from model:
+/// `k3*` → "1m" (1,000,000), otherwise → "260k" (262,144).
+pub fn default_max_context_size(model: Option<&str>) -> &'static str {
+    match model {
+        Some(m) if m.starts_with("k3") => "1m",
+        _ => "260k",
+    }
+}
+
+/// Resolve max_context_size label to the numeric value for kimi config.
+pub fn resolve_max_context_size(size: Option<&str>) -> u64 {
+    match size {
+        Some("1m") => 1_000_000,
+        _ => 262_144,
+    }
 }
 
 /// Approval level for Codex profiles. Stored as a string in TOML,
@@ -99,6 +117,8 @@ pub struct Profile {
     pub full_auto: Option<ApprovalLevel>,
     #[serde(default)]
     pub auth_type: Option<String>,
+    #[serde(default)]
+    pub max_context_size: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -136,6 +156,16 @@ backend = "codex"
 
 # [profiles.env]
 # OPENAI_API_KEY = "sk-..."
+
+[[profiles]]
+name = "default-kimi"
+description = "Default Kimi"
+backend = "kimi"
+model = "kimi-k2"
+base_url = "https://api.kimi.com/v1"
+
+# [profiles.env]
+# ANTHROPIC_API_KEY = "sk-..."
 "#;
 
 pub fn ensure_default_config() -> Result<()> {
@@ -166,6 +196,29 @@ pub fn ensure_codex_profile() -> Result<()> {
             backend: Backend::Codex,
             full_auto: None,
             auth_type: None,
+            max_context_size: None,
+        })?;
+    }
+    Ok(())
+}
+
+/// Ensure at least one Kimi profile exists. If no Kimi profiles are found,
+/// appends a `default-kimi` profile to the config file.
+pub fn ensure_kimi_profile() -> Result<()> {
+    let profiles = load_profiles()?;
+    let has_kimi = profiles.iter().any(|p| p.backend == Backend::Kimi);
+    if !has_kimi {
+        append_profile(&NewProfile {
+            name: "default-kimi".into(),
+            description: Some("Default Kimi".into()),
+            base_url: Some("https://api.kimi.com/v1".into()),
+            api_key: None,
+            model: Some("kimi-k2".into()),
+            fast_model: None,
+            backend: Backend::Kimi,
+            full_auto: None,
+            auth_type: None,
+            max_context_size: None,
         })?;
     }
     Ok(())
@@ -188,6 +241,24 @@ pub fn validate_profiles(profiles: &[Profile]) -> Result<()> {
         if p.backend == Backend::Claude && p.auth_type.as_deref() == Some("subscription") {
             anyhow::bail!(
                 "Profile {:?}: claude backend does not support auth_type = \"subscription\"",
+                p.name
+            );
+        }
+        if p.backend == Backend::Kimi && p.skip_permissions.unwrap_or(false) {
+            anyhow::bail!(
+                "Profile {:?}: kimi backend does not support skip_permissions",
+                p.name
+            );
+        }
+        if p.backend == Backend::Kimi && p.full_auto.is_some() {
+            anyhow::bail!(
+                "Profile {:?}: kimi backend does not support full_auto",
+                p.name
+            );
+        }
+        if p.backend == Backend::Kimi && p.auth_type.is_some() {
+            anyhow::bail!(
+                "Profile {:?}: kimi backend does not support auth_type",
                 p.name
             );
         }
@@ -214,6 +285,7 @@ pub struct NewProfile {
     pub backend: Backend,
     pub full_auto: Option<ApprovalLevel>,
     pub auth_type: Option<String>,
+    pub max_context_size: Option<String>,
 }
 
 pub fn profile_name_exists(name: &str) -> Result<bool> {
@@ -287,6 +359,7 @@ pub fn update_profile(original_name: &str, updated: &NewProfile) -> Result<()> {
         Backend::Claude => {
             entry.remove("backend");
             entry.remove("full_auto");
+            entry.remove("max_context_size");
 
             let auth_key = if updated.auth_type.as_deref() == Some("token") {
                 "ANTHROPIC_AUTH_TOKEN"
@@ -353,6 +426,7 @@ pub fn update_profile(original_name: &str, updated: &NewProfile) -> Result<()> {
         Backend::Codex => {
             entry["backend"] = value("codex");
             entry.remove("description");
+            entry.remove("max_context_size");
             set_optional_string(
                 entry,
                 "full_auto",
@@ -366,6 +440,38 @@ pub fn update_profile(original_name: &str, updated: &NewProfile) -> Result<()> {
 
             let env = ensure_env_table(entry);
             set_optional_string(env, "OPENAI_API_KEY", non_empty(&updated.api_key));
+        }
+        Backend::Kimi => {
+            entry["backend"] = value("kimi");
+            entry.remove("full_auto");
+            entry.remove("auth_type");
+            set_optional_string(
+                entry,
+                "max_context_size",
+                non_empty(&updated.max_context_size),
+            );
+
+            let env = ensure_env_table(entry);
+            set_optional_string(env, "ANTHROPIC_BASE_URL", non_empty(&updated.base_url));
+            set_optional_string(env, "ANTHROPIC_API_KEY", non_empty(&updated.api_key));
+            set_optional_string(env, "ANTHROPIC_MODEL", non_empty(&updated.model));
+            // Remove keys written by the Claude/Codex arms so a profile
+            // switched from another backend comes out clean.
+            for key in [
+                "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                "CLAUDE_CODE_SUBAGENT_MODEL",
+                "API_TIMEOUT_MS",
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+                "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK",
+                "CLAUDE_CODE_EFFORT_LEVEL",
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+                "ANTHROPIC_SMALL_FAST_MODEL",
+                "ANTHROPIC_AUTH_TOKEN",
+                "OPENAI_API_KEY",
+            ] {
+                env.remove(key);
+            }
         }
     }
 
@@ -387,6 +493,7 @@ pub fn append_profile(profile: &NewProfile) -> Result<()> {
             match profile.backend {
                 Backend::Codex => "codex",
                 Backend::Claude => "claude",
+                Backend::Kimi => "kimi",
             }
         ));
     }
@@ -395,6 +502,9 @@ pub fn append_profile(profile: &NewProfile) -> Result<()> {
     }
     if let Some(base_url) = non_empty(&profile.base_url) {
         block.push_str(&format!("base_url = {:?}\n", base_url));
+    }
+    if let Some(max_context_size) = non_empty(&profile.max_context_size) {
+        block.push_str(&format!("max_context_size = {:?}\n", max_context_size));
     }
     if let Some(full_auto) = &profile.full_auto {
         block.push_str(&format!("full_auto = {:?}\n", full_auto.as_str()));
@@ -451,6 +561,24 @@ pub fn append_profile(profile: &NewProfile) -> Result<()> {
                 block.push_str("\n[profiles.env]\n");
                 if let Some(key) = api_key {
                     block.push_str(&format!("OPENAI_API_KEY = {:?}\n", key));
+                }
+            }
+        }
+        Backend::Kimi => {
+            let base_url = non_empty(&profile.base_url);
+            let api_key = non_empty(&profile.api_key);
+            let model = non_empty(&profile.model);
+
+            if base_url.is_some() || api_key.is_some() || model.is_some() {
+                block.push_str("\n[profiles.env]\n");
+                if let Some(url) = base_url {
+                    block.push_str(&format!("ANTHROPIC_BASE_URL = {:?}\n", url));
+                }
+                if let Some(key) = api_key {
+                    block.push_str(&format!("ANTHROPIC_API_KEY = {:?}\n", key));
+                }
+                if let Some(m) = model {
+                    block.push_str(&format!("ANTHROPIC_MODEL = {:?}\n", m));
                 }
             }
         }
@@ -592,6 +720,45 @@ pub fn toggle_full_auto(profile_name: &str, new_value: Option<&str>) -> Result<(
     Ok(())
 }
 
+/// Toggle `max_context_size` for a named Kimi profile between "1m" and "260k".
+/// Computes the current effective value (explicit field, else the model-based
+/// default) and writes the opposite explicit value.
+/// Uses toml_edit for surgical edits that preserve comments and formatting.
+pub fn toggle_kimi_max_context_size(profile_name: &str) -> Result<()> {
+    let path = config_path();
+    let content = fs::read_to_string(&path).with_context(|| format!("read config {path:?}"))?;
+    let mut doc = content
+        .parse::<toml_edit::DocumentMut>()
+        .with_context(|| format!("parse TOML in {path:?}"))?;
+
+    let profiles = doc
+        .get_mut("profiles")
+        .and_then(|v| v.as_array_of_tables_mut())
+        .with_context(|| "no [[profiles]] array in config")?;
+
+    let entry = profiles
+        .iter_mut()
+        .find(|t| t.get("name").and_then(|v| v.as_str()) == Some(profile_name))
+        .with_context(|| format!("profile {profile_name:?} not found in config"))?;
+
+    let model = entry
+        .get("model")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let explicit = entry
+        .get("max_context_size")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let effective = explicit
+        .as_deref()
+        .unwrap_or_else(|| default_max_context_size(model.as_deref()));
+    let new_value = if effective == "1m" { "260k" } else { "1m" };
+
+    entry["max_context_size"] = value(new_value);
+    fs::write(&path, doc.to_string()).with_context(|| format!("write config {path:?}"))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -660,11 +827,12 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: None,
+            max_context_size: None,
         };
         append_profile(&new).unwrap();
         let profiles = load_profiles().unwrap();
         assert!(profiles.iter().any(|p| p.name == "test-profile"));
-        assert_eq!(profiles.len(), 3); // default + default-codex + new
+        assert_eq!(profiles.len(), 4); // default + default-codex + default-kimi + new
 
         std::env::remove_var("CCT_CONFIG");
     }
@@ -688,6 +856,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: None,
+            max_context_size: None,
         };
         append_profile(&new).unwrap();
         let content = std::fs::read_to_string(&path).unwrap();
@@ -765,6 +934,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: None,
+            max_context_size: None,
         };
         append_profile(&new).unwrap();
 
@@ -866,6 +1036,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: None,
+            max_context_size: None,
         };
         append_profile(&new).unwrap();
 
@@ -927,6 +1098,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: None,
+            max_context_size: None,
         };
         append_profile(&new).unwrap();
 
@@ -1039,6 +1211,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: None,
+            max_context_size: None,
         };
         append_profile(&new).unwrap();
         let profiles = load_profiles().unwrap();
@@ -1094,6 +1267,7 @@ base_url = "https://api.example.com/v1"
             base_url: None,
             full_auto: None,
             auth_type: None,
+            max_context_size: None,
         }];
         let result = validate_profiles(&profiles);
         assert!(result.is_err());
@@ -1117,6 +1291,7 @@ base_url = "https://api.example.com/v1"
             base_url: None,
             full_auto: Some(ApprovalLevel::Danger),
             auth_type: None,
+            max_context_size: None,
         }];
         let result = validate_profiles(&profiles);
         assert!(result.is_err());
@@ -1210,6 +1385,7 @@ base_url = "https://api.example.com/v1"
             backend: Backend::Codex,
             full_auto: Some(ApprovalLevel::Danger),
             auth_type: None,
+            max_context_size: None,
         };
         append_profile(&new).unwrap();
 
@@ -1281,6 +1457,7 @@ OPENAI_API_KEY = "sk-old"
             backend: Backend::Codex,
             full_auto: Some(ApprovalLevel::Danger),
             auth_type: None,
+            max_context_size: None,
         };
 
         update_profile("codex-profile", &updated).unwrap();
@@ -1346,6 +1523,7 @@ CUSTOM_HEADER = "keep-me"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: None,
+            max_context_size: None,
         };
 
         update_profile("claude-profile", &updated).unwrap();
@@ -1423,6 +1601,7 @@ description = "Second profile"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: None,
+            max_context_size: None,
         };
 
         update_profile("first", &updated).unwrap();
@@ -1457,6 +1636,7 @@ description = "Second profile"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: None,
+            max_context_size: None,
         };
 
         let result = update_profile("missing", &updated);
@@ -1561,6 +1741,7 @@ description = "Second profile"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: Some("token".into()),
+            max_context_size: None,
         };
         append_profile(&new).unwrap();
 
@@ -1605,6 +1786,7 @@ description = "Second profile"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: Some("token".into()),
+            max_context_size: None,
         };
         update_profile("upd", &updated).unwrap();
 
@@ -1701,6 +1883,7 @@ description = "Second profile"
             base_url: None,
             full_auto: None,
             auth_type: Some("subscription".into()),
+            max_context_size: None,
         }];
         let result = validate_profiles(&profiles);
         assert!(result.is_err());
@@ -1729,6 +1912,7 @@ description = "Second profile"
             backend: Backend::Codex,
             full_auto: None,
             auth_type: Some("subscription".into()),
+            max_context_size: None,
         };
         append_profile(&new).unwrap();
 
@@ -1741,5 +1925,380 @@ description = "Second profile"
         );
 
         std::env::remove_var("CCT_CONFIG");
+    }
+
+    // --- Kimi backend tests ---
+
+    #[test]
+    fn default_max_context_size_detects_k3() {
+        assert_eq!(default_max_context_size(Some("k3")), "1m");
+        assert_eq!(default_max_context_size(Some("k3-latest")), "1m");
+        assert_eq!(default_max_context_size(Some("kimi-k2")), "260k");
+        assert_eq!(default_max_context_size(None), "260k");
+    }
+
+    #[test]
+    fn resolve_max_context_size_maps_labels() {
+        assert_eq!(resolve_max_context_size(Some("1m")), 1_000_000);
+        assert_eq!(resolve_max_context_size(Some("260k")), 262_144);
+        assert_eq!(resolve_max_context_size(None), 262_144);
+        assert_eq!(resolve_max_context_size(Some("other")), 262_144);
+    }
+
+    #[test]
+    #[serial]
+    fn toggle_kimi_max_context_size_from_k3_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(
+            &path,
+            "[[profiles]]\nname = \"kimi-test\"\nbackend = \"kimi\"\nmodel = \"k3\"\n",
+        )
+        .unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        // No explicit field: effective default for k3 is "1m", so toggle writes "260k"
+        toggle_kimi_max_context_size("kimi-test").unwrap();
+        let profiles = load_profiles().unwrap();
+        assert_eq!(profiles[0].max_context_size.as_deref(), Some("260k"));
+
+        // Toggle back to "1m"
+        toggle_kimi_max_context_size("kimi-test").unwrap();
+        let profiles = load_profiles().unwrap();
+        assert_eq!(profiles[0].max_context_size.as_deref(), Some("1m"));
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn toggle_kimi_max_context_size_from_other_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(
+            &path,
+            "# comment\n[[profiles]]\nname = \"kimi-test\"\nbackend = \"kimi\"\nmodel = \"kimi-k2\"\n",
+        )
+        .unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        // Effective default for kimi-k2 is "260k", so toggle writes "1m"
+        toggle_kimi_max_context_size("kimi-test").unwrap();
+        let profiles = load_profiles().unwrap();
+        assert_eq!(profiles[0].max_context_size.as_deref(), Some("1m"));
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("# comment"), "comment should be preserved");
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn toggle_kimi_max_context_size_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, "[[profiles]]\nname = \"other\"\n").unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let result = toggle_kimi_max_context_size("missing");
+        assert!(result.is_err());
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    fn validate_profiles_rejects_kimi_skip_permissions() {
+        let profiles = vec![Profile {
+            name: "bad-kimi".into(),
+            description: None,
+            env: None,
+            extra_args: None,
+            skip_permissions: Some(true),
+            model: None,
+            backend: Backend::Kimi,
+            base_url: None,
+            full_auto: None,
+            auth_type: None,
+            max_context_size: None,
+        }];
+        let result = validate_profiles(&profiles);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("kimi") || msg.contains("skip_permissions"),
+            "Error should mention kimi or skip_permissions, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_profiles_rejects_kimi_full_auto() {
+        let profiles = vec![Profile {
+            name: "bad-kimi".into(),
+            description: None,
+            env: None,
+            extra_args: None,
+            skip_permissions: None,
+            model: None,
+            backend: Backend::Kimi,
+            base_url: None,
+            full_auto: Some(ApprovalLevel::Danger),
+            auth_type: None,
+            max_context_size: None,
+        }];
+        let result = validate_profiles(&profiles);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("kimi") || msg.contains("full_auto"),
+            "Error should mention kimi or full_auto, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_profiles_rejects_kimi_auth_type() {
+        let profiles = vec![Profile {
+            name: "bad-kimi".into(),
+            description: None,
+            env: None,
+            extra_args: None,
+            skip_permissions: None,
+            model: None,
+            backend: Backend::Kimi,
+            base_url: None,
+            full_auto: None,
+            auth_type: Some("token".into()),
+            max_context_size: None,
+        }];
+        let result = validate_profiles(&profiles);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("kimi") || msg.contains("auth_type"),
+            "Error should mention kimi or auth_type, got: {msg}"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn append_kimi_profile_writes_minimal_env() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, DEFAULT_CONFIG).unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let new = NewProfile {
+            name: "kimi-profile".into(),
+            description: Some("Kimi backend".into()),
+            base_url: Some("https://api.kimi.com/v1".into()),
+            api_key: Some("sk-kimi-key".into()),
+            model: Some("kimi-k2".into()),
+            fast_model: None,
+            backend: Backend::Kimi,
+            full_auto: None,
+            auth_type: None,
+            max_context_size: Some("1m".into()),
+        };
+        append_profile(&new).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let block_start = content
+            .find("name = \"kimi-profile\"")
+            .expect("kimi profile should exist");
+        let appended_block = &content[block_start..];
+
+        assert!(
+            appended_block.contains("backend = \"kimi\""),
+            "Expected backend field in output, got:\n{appended_block}"
+        );
+        assert!(
+            appended_block.contains("max_context_size = \"1m\""),
+            "Expected max_context_size field in output, got:\n{appended_block}"
+        );
+        assert!(
+            appended_block.contains("ANTHROPIC_BASE_URL"),
+            "Expected ANTHROPIC_BASE_URL in output, got:\n{appended_block}"
+        );
+        assert!(
+            appended_block.contains("ANTHROPIC_API_KEY"),
+            "Expected ANTHROPIC_API_KEY in output, got:\n{appended_block}"
+        );
+        assert!(
+            appended_block.contains("ANTHROPIC_MODEL"),
+            "Expected ANTHROPIC_MODEL in output, got:\n{appended_block}"
+        );
+        // Kimi should NOT generate Claude-specific or Codex-specific vars
+        for absent in [
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "ANTHROPIC_SMALL_FAST_MODEL",
+            "CLAUDE_CODE_SUBAGENT_MODEL",
+            "API_TIMEOUT_MS",
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+            "OPENAI_API_KEY",
+        ] {
+            assert!(
+                !appended_block.contains(absent),
+                "Kimi profile should NOT contain {absent}, got:\n{appended_block}"
+            );
+        }
+
+        // Round-trip verification
+        let profiles = load_profiles().unwrap();
+        let p = profiles.iter().find(|p| p.name == "kimi-profile").unwrap();
+        assert_eq!(p.backend, Backend::Kimi);
+        assert_eq!(p.max_context_size.as_deref(), Some("1m"));
+        let env = p.env.as_ref().expect("env section should exist");
+        assert_eq!(env.len(), 3, "Kimi env should have exactly 3 vars");
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn append_kimi_profile_minimal_no_env_section() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, DEFAULT_CONFIG).unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let new = NewProfile {
+            name: "kimi-no-env".into(),
+            description: None,
+            base_url: None,
+            api_key: None,
+            model: None,
+            fast_model: None,
+            backend: Backend::Kimi,
+            full_auto: None,
+            auth_type: None,
+            max_context_size: None,
+        };
+        append_profile(&new).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let block_start = content
+            .find("name = \"kimi-no-env\"")
+            .expect("kimi profile should exist");
+        let appended_block = &content[block_start..];
+        assert!(
+            appended_block.contains("backend = \"kimi\""),
+            "Expected backend field in output, got:\n{appended_block}"
+        );
+        assert!(
+            !appended_block.contains("[profiles.env]"),
+            "Expected NO [profiles.env] section for minimal kimi profile, got:\n{appended_block}"
+        );
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn update_profile_switches_claude_to_kimi_cleanly() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(
+            &path,
+            r#"[[profiles]]
+name = "switch-me"
+model = "claude-sonnet-4-6"
+base_url = "https://old.example/v1"
+
+[profiles.env]
+ANTHROPIC_BASE_URL = "https://old.example/v1"
+ANTHROPIC_API_KEY = "sk-old"
+ANTHROPIC_MODEL = "claude-sonnet-4-6"
+ANTHROPIC_DEFAULT_SONNET_MODEL = "claude-sonnet-4-6"
+ANTHROPIC_DEFAULT_OPUS_MODEL = "claude-sonnet-4-6"
+CLAUDE_CODE_SUBAGENT_MODEL = "claude-sonnet-4-6"
+ANTHROPIC_DEFAULT_HAIKU_MODEL = "claude-haiku"
+ANTHROPIC_SMALL_FAST_MODEL = "claude-haiku"
+API_TIMEOUT_MS = "600000"
+CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK = "1"
+CLAUDE_CODE_EFFORT_LEVEL = "max"
+"#,
+        )
+        .unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let updated = NewProfile {
+            name: "switch-me".into(),
+            description: Some("Now kimi".into()),
+            base_url: Some("https://api.kimi.com/v1".into()),
+            api_key: Some("sk-new-kimi".into()),
+            model: Some("k3".into()),
+            fast_model: None,
+            backend: Backend::Kimi,
+            full_auto: None,
+            auth_type: None,
+            max_context_size: Some("260k".into()),
+        };
+        update_profile("switch-me", &updated).unwrap();
+
+        let profiles = load_profiles().unwrap();
+        let profile = &profiles[0];
+        assert_eq!(profile.backend, Backend::Kimi);
+        assert_eq!(profile.max_context_size.as_deref(), Some("260k"));
+        assert!(profile.full_auto.is_none());
+        assert!(profile.auth_type.is_none());
+        let env = profile.env.as_ref().unwrap();
+        assert_eq!(env.len(), 3, "Kimi env should have exactly 3 vars");
+        assert_eq!(
+            env.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://api.kimi.com/v1")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_API_KEY").map(String::as_str),
+            Some("sk-new-kimi")
+        );
+        assert_eq!(env.get("ANTHROPIC_MODEL").map(String::as_str), Some("k3"));
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn ensure_kimi_profile_appends_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, "[[profiles]]\nname = \"default\"\n").unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        ensure_kimi_profile().unwrap();
+        let profiles = load_profiles().unwrap();
+        let kimi = profiles
+            .iter()
+            .find(|p| p.backend == Backend::Kimi)
+            .expect("a kimi profile should exist");
+        assert_eq!(kimi.name, "default-kimi");
+        assert_eq!(kimi.model.as_deref(), Some("kimi-k2"));
+        assert_eq!(kimi.base_url.as_deref(), Some("https://api.kimi.com/v1"));
+
+        // Second call is a no-op
+        ensure_kimi_profile().unwrap();
+        let profiles = load_profiles().unwrap();
+        assert_eq!(
+            profiles
+                .iter()
+                .filter(|p| p.backend == Backend::Kimi)
+                .count(),
+            1
+        );
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    fn default_config_contains_default_kimi() {
+        let cfg: Config = toml::from_str(DEFAULT_CONFIG).unwrap();
+        let kimi = cfg
+            .profiles
+            .iter()
+            .find(|p| p.name == "default-kimi")
+            .expect("DEFAULT_CONFIG should contain default-kimi");
+        assert_eq!(kimi.backend, Backend::Kimi);
     }
 }

@@ -80,6 +80,7 @@ fn build_args_ordering() {
         base_url: None,
         full_auto: None,
         auth_type: None,
+        max_context_size: None,
     };
     let args = launch::build_args(&profile, false);
     assert_eq!(
@@ -109,6 +110,7 @@ fn build_args_empty_profile() {
         base_url: None,
         full_auto: None,
         auth_type: None,
+        max_context_size: None,
     };
     let args = launch::build_args(&profile, false);
     assert!(args.is_empty());

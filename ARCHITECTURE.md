@@ -9,7 +9,7 @@ generated_by: mci-phase-1
 
 ## Project Overview
 
-- **Problem Domain**: `cct` is a terminal UI launcher for Claude Code and OpenAI Codex. It lets users define named "profiles" (different model configs, API keys, extra flags) for both `claude` and `codex` CLIs in a single TOML file, and select them via an interactive ratatui TUI. Profiles are organized into two backend tabs (Claude / Codex), and the selected profile is launched via Unix exec-replace.
+- **Problem Domain**: `cct` is a terminal UI launcher for Claude Code, OpenAI Codex, and Kimi Code. It lets users define named "profiles" (different model configs, API keys, extra flags) for the `claude`, `codex`, and `kimi` CLIs in a single TOML file, and select them via an interactive ratatui TUI. Profiles are organized into three backend tabs (Claude / Codex / Kimi), and the selected profile is launched via Unix exec-replace.
 - **Primary Users**: Individual developers who run Claude Code locally across multiple configurations (e.g., different models, API providers, permission modes).
 
 ## Tech Stack
@@ -33,17 +33,17 @@ generated_by: mci-phase-1
 Config (TOML) → App (cursor state + backend filter) → UI (ratatui draw loop) → Launch (exec-replace)
 ```
 
-Each module has no circular dependency. `launch` dispatches to either `exec_claude` or `exec_codex` based on `profile.backend`. `ui` uses `app.filtered_indices()` to render only the profiles matching `app.active_backend`.
+Each module has no circular dependency. `launch` dispatches to `exec_claude`, `exec_codex`, or `exec_kimi` based on `profile.backend`. `ui` uses `app.filtered_indices()` to render only the profiles matching `app.active_backend`.
 
 ## Core Modules (First-level)
 
 | Module | File | Responsibility |
 |--------|------|----------------|
-| `config` | `src/config.rs` | Deserialize `profiles.toml` via serde/toml; `Backend` enum; `validate_profiles`; write default config on first run; append/update profiles with backend-specific env generation; `toggle_skip_permissions`, `toggle_auth_type`, `toggle_full_auto` via toml_edit |
+| `config` | `src/config.rs` | Deserialize `profiles.toml` via serde/toml; `Backend` enum; `validate_profiles`; write default config on first run; append/update profiles with backend-specific env generation; `toggle_skip_permissions`, `toggle_auth_type`, `toggle_full_auto`, `toggle_kimi_max_context_size` via toml_edit |
 | `app` | `src/app.rs` | Cursor state (`selected`), `active_backend`, `filtered_indices()`, `switch_backend()`, `AppMode` (Normal/AddForm), `FormState` with `to_new_profile()` as single source of truth for field-index mapping |
 | `ui` | `src/ui.rs` | ratatui rendering — tab bar + 35/65 split filtered list + detail/form panel + footer; `build_form_lines` uses `field_labels(backend)` dynamically; masks sensitive env vars |
-| `launch` | `src/launch.rs` | `build_launch_command` dispatch; `exec_claude`/`exec_codex`; `generate_codex_config` writes `~/.config/cct-tui/codex/config.toml`; `exec()` process replacement; open `$EDITOR` |
-| `cli` | `src/cli.rs` | `cct add` interactive CLI subcommand — 5 prompts, masked summary, duplicate guard; creates Claude profiles only |
+| `launch` | `src/launch.rs` | `build_launch_command` dispatch; `exec_claude`/`exec_codex`/`exec_kimi`; codex launched through local proxy via inline `--config` flags; `generate_kimi_config` surgically writes `~/.kimi-code/config.toml`; `exec()` process replacement; open `$EDITOR` |
+| `cli` | `src/cli.rs` | `cct add` interactive CLI subcommand — 6 prompts, masked summary, duplicate guard, `--backend` flag (claude/codex/kimi) |
 
 ## Critical Path
 
@@ -51,11 +51,14 @@ Each module has no circular dependency. `launch` dispatches to either `exec_clau
 ```
 src/main.rs (entry point)
   → config::ensure_default_config()   # create ~/.config/cc-tui/profiles.toml if absent
+  → config::ensure_codex_profile()    # append default-codex profile if none exists
+  → config::ensure_kimi_profile()     # append default-kimi profile if none exists
   → launch::check_claude_installed()  # `which claude` — false if missing
       → [if missing] launch::prompt_install()
           → prompt "Install now? [Y/n]"
           → [Y] run `curl -fsSL https://claude.ai/install.sh | bash`
           → re-check PATH + ~/.local/bin fallback → exit 1 on unresolvable failure
+  → launch::check_kimi_installed()    # `which kimi` — missing only prints a non-blocking install hint
   → config::load_profiles()           # parse TOML → Vec<Profile>
   → crossterm: enable_raw_mode + EnterAlternateScreen
   → App::new(profiles)                # initialize cursor at index 0, mode = Normal
@@ -87,21 +90,41 @@ User presses [Enter] (mode = Normal, active_backend = Codex)
   → launch::restore_terminal()
   → launch::exec_codex(&profile)
       → check_codex_installed()       # `which codex` — error if not found
-      → generate_codex_config(&profile, codex_home)
-          → writes ~/.config/cct-tui/codex/config.toml with model, base_url, name
-      → env::set_var("CODEX_HOME", codex_home)
-      → env::set_var(k, v) for each profile.env entry (OPENAI_API_KEY)
-      → launch::build_codex_args(profile)  # --full-auto, extra_args (no --model)
+      → API key mode: exec_codex_proxy
+          → ensure_proxy_running()    # spawn `cct proxy` daemon if needed
+          → proxy::switch_profile(base_url, OPENAI_API_KEY, model)
+          → build_codex_proxy_config_args(model, port)  # inline --config flags
+      → subscription mode (auth_type = "subscription"): exec_codex_subscription
+          → build_codex_subscription_args  # --config model_provider=openai
+      → env::set_var(k, v) for each profile.env entry
       → Command::new("codex").args(...).exec()  # Unix exec — process replaced
+```
+
+### Main Use Case — Launch Kimi Profile
+```
+User presses [Enter] (mode = Normal, active_backend = Kimi)
+  → launch::restore_terminal()
+  → launch::exec_kimi(&profile)
+      → check_kimi_installed()        # `which kimi` — error if not found
+      → generate_kimi_config(&profile)
+          → surgically writes [providers."<name>"] and [models."<name>/<model>"]
+            into ~/.kimi-code/config.toml via toml_edit (existing tables preserved)
+          → model entry gets capabilities, display_name (uppercased model),
+            max_context_size (explicit field, else k3* → 1m / otherwise 260k),
+            and support_efforts/default_effort for k3* models only
+      → env::set_var(k, v) for each profile.env entry
+      → launch::build_kimi_args(profile)   # -m <name>/<model>, extra_args
+      → Command::new("kimi").args(...).exec()  # Unix exec — process replaced
 ```
 
 ### Add Profile — TUI Form (key `a`)
 ```
 User presses [a] (mode = Normal)
   → app.mode = AppMode::AddForm(FormState::new() with backend = active_backend)
-  → TUI renders 5-field form:
-      Claude: Name *, Description, Base URL, API Key, Model
-      Codex:  Name *, Base URL, API Key, Model, Full Auto (y/n)
+  → TUI renders 6-field form:
+      Claude: Name *, Description, Base URL, API Key, Pro Model, Fast Model
+      Codex:  Name *, Base URL, API Key, Model, Approval, (unused)
+      Kimi:   Name *, Description, Base URL, API Key, Model, Context (1m/260k)
   → User fills fields (Tab/↑↓ navigate, Backspace edits)
   → User presses [Enter] on last field → form.confirming = true
   → TUI shows confirmation summary (API Key masked via mask_value)
@@ -111,6 +134,7 @@ User presses [a] (mode = Normal)
       → config::append_profile(&new_profile)
           → Claude: writes [[profiles]] block + [profiles.env] (ANTHROPIC_* vars)
           → Codex: writes [[profiles]] block with base_url + full_auto fields + [profiles.env] (OPENAI_API_KEY only)
+          → Kimi: writes [[profiles]] block + [profiles.env] (only ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY, ANTHROPIC_MODEL)
       → config::load_profiles()       # reload to pick up new profile
       → app.selected = index of new profile
       → app.mode = AppMode::Normal
@@ -118,9 +142,10 @@ User presses [a] (mode = Normal)
 
 ### Add Profile — CLI (`cct add`)
 ```
-cct add
+cct add [--backend claude|codex|kimi]
   → cli::run_add()
-      → 5 sequential prompts (name required, rest optional)
+      → resolve_backend(--backend flag)  # default claude, case-insensitive
+      → 6 sequential prompts (name required, rest optional)
       → duplicate name check via config::profile_name_exists
       → masked summary display (API Key shown as "sk-1...key4")
       → Save? (y/n) confirmation
@@ -162,6 +187,17 @@ User presses [t] (mode = Normal, profiles non-empty, backend = Claude)
   → app.profiles[app.selected] = reloaded profile
 ```
 
+### Toggle max_context_size (Space, Kimi profiles)
+```
+User presses [Space] (mode = Normal, profiles non-empty, backend = Kimi)
+  → config::toggle_kimi_max_context_size(&profile.name)
+      → parse TOML with toml_edit::DocumentMut (preserves comments)
+      → effective value = explicit max_context_size, else model-based default (k3* → "1m", else "260k")
+      → write the opposite explicit value ("1m" ↔ "260k")
+  → config::load_profiles() to reload updated profile
+  → app.profiles[app.selected] = reloaded profile
+```
+
 ### Duplicate Profile (key `d`)
 ```
 User presses [d] (mode = Normal, profiles non-empty)
@@ -190,12 +226,14 @@ User presses [e]
 |--------------|--------|
 | `~/.config/cc-tui/profiles.toml` (default) | Main profile store; location overridable via `CCT_CONFIG` env var |
 | `CCT_CONFIG` env var | Override config file path (used by integration tests) |
+| `CCT_KIMI_CONFIG` env var | Override kimi config path (`~/.kimi-code/config.toml`); used by tests so the real file is never touched |
 | `CCT_CLAUDE_BIN` env var | Override binary name used by `check_claude_installed` (used by unit tests to substitute `"true"` or a nonexistent binary) |
 | `$EDITOR` env var | Editor opened on `e` key; falls back to `vi` |
-| `profiles[].backend` | `"claude"` (default) or `"codex"` — determines which binary is exec'd |
-| `profiles[].base_url` | First-class profile field. Claude: becomes `ANTHROPIC_BASE_URL` in env. Codex: written to `config.toml` via `generate_codex_config`. |
+| `profiles[].backend` | `"claude"` (default), `"codex"`, or `"kimi"` — determines which binary is exec'd |
+| `profiles[].base_url` | First-class profile field. Claude: becomes `ANTHROPIC_BASE_URL` in env. Codex: upstream URL passed to the local proxy. Kimi: provider `base_url` in `~/.kimi-code/config.toml` (scheme + `/v1` normalized). |
 | `profiles[].full_auto = true` | Codex-only. Adds `--full-auto` to codex invocation. |
-| `profiles[].model` | Claude: adds `--model <value>`. Codex: written to `config.toml` (not passed as CLI arg). |
+| `profiles[].model` | Claude: adds `--model <value>`. Codex: passed to the proxy as the upstream model (not a CLI arg). Kimi: becomes the `[models."<name>/<model>"]` entry and `-m <name>/<model>` arg. |
+| `profiles[].max_context_size` | Kimi-only. `"1m"` (1,000,000) or `"260k"` (262,144); written to the kimi config model entry. Toggle via `Space`; unset means auto-detect from model. |
 | `profiles[].skip_permissions = true` | Claude-only. Adds `--dangerously-skip-permissions` to `claude` invocation. |
 | `profiles[].auth_type = "token"` | Claude-only. Uses `ANTHROPIC_AUTH_TOKEN` env var instead of `ANTHROPIC_API_KEY`. Toggle via `t` key or `cct add --auth-type token`. |
 | `profiles[].extra_args = [...]` | Appended verbatim after other flags |
@@ -214,23 +252,29 @@ graph TB
     User["Developer"]
     CCT["cct TUI (ratatui terminal)"]
     ProfilesFile["~/.config/cc-tui/profiles.toml (TOML config)"]
-    CodexConfig["~/.config/cct-tui/codex/config.toml (auto-generated)"]
+    KimiConfig["~/.kimi-code/config.toml (surgically updated)"]
     Claude["claude binary (Claude Code CLI)"]
     Codex["codex binary (OpenAI Codex CLI)"]
+    Kimi["kimi binary (Kimi Code CLI)"]
     Editor["$EDITOR (vi / nvim / etc.)"]
     AnthropicAPI["Anthropic API (or custom base URL)"]
     OpenAIAPI["OpenAI API (or custom base URL)"]
+    KimiAPI["Kimi API (or custom base URL)"]
 
     User -->|"navigate / launch / edit"| CCT
     CCT -->|"read on startup + hot-reload"| ProfilesFile
+    CCT -->|"write provider/model entries on launch"| KimiConfig
     CCT -->|"exec-replace (Unix exec)"| Claude
     CCT -->|"exec-replace (Unix exec)"| Codex
+    CCT -->|"exec-replace (Unix exec)"| Kimi
     CCT -->|"spawn on e key"| Editor
     Editor -->|"writes"| ProfilesFile
     Claude -->|"HTTPS"| AnthropicAPI
     Claude -->|"inherits env vars (ANTHROPIC_AUTH_TOKEN, etc.)"| AnthropicAPI
     Codex -->|"HTTPS"| OpenAIAPI
-    Codex -->|"inherits OPENAI_API_KEY + reads CODEX_HOME/config.toml"| OpenAIAPI
+    Codex -->|"inherits OPENAI_API_KEY"| OpenAIAPI
+    Kimi -->|"HTTPS"| KimiAPI
+    Kimi -->|"reads ~/.kimi-code/config.toml"| KimiAPI
 ```
 
 ## Test Infrastructure
@@ -250,11 +294,12 @@ graph TB
 - **No shared mutable state**: Each module is self-contained; `App` owns `Vec<Profile>` and is the single source of truth for cursor position, active backend, and UI mode.
 - **Backend-filtered navigation**: `App::filtered_indices()` returns only profiles matching `active_backend`. `next()`/`prev()` navigate within this subset. `switch_backend()` resets `selected` to 0.
 - **`FormState::to_new_profile()` as single source of truth**: All reads from the `fields` array that produce a `NewProfile` go through this one method. This prevents label-to-mapping drift when backends use different field-index conventions.
-- **`generate_codex_config` for codex launch**: Before exec-replacing with `codex`, `cct` writes `~/.config/cct-tui/codex/config.toml` from the selected profile's fields. Multiple codex profiles share one config file; it is fully rewritten each launch. `CODEX_HOME` is set to point codex at this directory.
-- **Auto-env-var generation on add**: Claude profiles generate a complete `[profiles.env]` block. Codex profiles only generate `OPENAI_API_KEY` in env (model and base_url go to `config.toml` instead).
-- **`toml_edit` for surgical writes**: `config::toggle_skip_permissions`, `toggle_auth_type`, and `toggle_full_auto` use `toml_edit::DocumentMut` rather than re-serializing the entire config, so user comments and key ordering are preserved on every toggle.
+- **`generate_kimi_config` for kimi launch**: Before exec-replacing with `kimi`, `cct` surgically writes `[providers."<name>"]` and `[models."<name>/<model>"]` into `~/.kimi-code/config.toml` via `toml_edit`, preserving all pre-existing tables (e.g. `managed:kimi-code` providers from `kimi login`). Model entries carry hardcoded `capabilities`, an uppercased `display_name`, a resolved `max_context_size`, and `support_efforts`/`default_effort` only for `k3*` models.
+- **Codex launch through local proxy**: Before exec-replacing with `codex`, `cct` ensures the `cct proxy` daemon is running, switches it to the profile's upstream, and passes the custom provider via inline `--config` flags, leaving `CODEX_HOME` at its default so profiles share history/sessions.
+- **Auto-env-var generation on add**: Claude profiles generate a complete `[profiles.env]` block. Codex profiles only generate `OPENAI_API_KEY` in env. Kimi profiles generate exactly 3 vars (`ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`).
+- **`toml_edit` for surgical writes**: `config::toggle_skip_permissions`, `toggle_auth_type`, `toggle_full_auto`, and `toggle_kimi_max_context_size` use `toml_edit::DocumentMut` rather than re-serializing the entire config, so user comments and key ordering are preserved on every toggle.
 - **`skip_permissions` red visual indicator**: Profile list rows are rendered in `Color::Red` when `skip_permissions = true`, providing an immediate danger signal in the TUI.
-- **Dual add surface (CLI + TUI)**: `cct add` (CLI) and `a` key (TUI) both funnel through `config::append_profile`. The CLI always creates Claude profiles; the TUI uses `active_backend`.
+- **Dual add surface (CLI + TUI)**: `cct add` (CLI) and `a` key (TUI) both funnel through `config::append_profile`. The CLI selects the backend via `--backend` (default Claude); the TUI uses `active_backend`.
 - **Autoinstall on startup**: `main` calls `launch::check_claude_installed()` before entering the TUI. If `claude` is absent, `prompt_install()` offers to run the official installer interactively before raw mode is enabled.
 - **`install.sh` curl|bash installer**: A standalone Bash script downloads the latest GitHub Release tarball, verifies it with `tar -tzf`, retries up to 3 times on download failure, and installs to `~/.local/bin`. Does not require root.
 

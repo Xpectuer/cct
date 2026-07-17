@@ -11,6 +11,14 @@ pub fn field_labels(backend: &Backend) -> [&'static str; 6] {
             "Fast Model",
         ],
         Backend::Codex => ["Name *", "Base URL", "API Key", "Model", "Approval", ""],
+        Backend::Kimi => [
+            "Name *",
+            "Description",
+            "Base URL",
+            "API Key",
+            "Model",
+            "Context (1m/260k)",
+        ],
     }
 }
 
@@ -113,6 +121,28 @@ impl FormState {
                     String::new(),
                 ];
             }
+            Backend::Kimi => {
+                let env = profile.env.as_ref();
+                form.fields = [
+                    profile.name.clone(),
+                    profile.description.clone().unwrap_or_default(),
+                    profile.base_url.clone().unwrap_or_else(|| {
+                        env.and_then(|map| map.get("ANTHROPIC_BASE_URL").cloned())
+                            .unwrap_or_default()
+                    }),
+                    env.and_then(|map| {
+                        map.get("ANTHROPIC_AUTH_TOKEN")
+                            .or_else(|| map.get("ANTHROPIC_API_KEY"))
+                            .cloned()
+                    })
+                    .unwrap_or_default(),
+                    profile.model.clone().unwrap_or_else(|| {
+                        env.and_then(|map| map.get("ANTHROPIC_MODEL").cloned())
+                            .unwrap_or_default()
+                    }),
+                    profile.max_context_size.clone().unwrap_or_default(),
+                ];
+            }
         }
 
         form
@@ -159,6 +189,7 @@ impl FormState {
                     backend: Backend::Claude,
                     full_auto: None,
                     auth_type: self.auth_type.clone(),
+                    max_context_size: None,
                 }
             }
             Backend::Codex => {
@@ -191,6 +222,38 @@ impl FormState {
                     backend: Backend::Codex,
                     full_auto,
                     auth_type: None,
+                    max_context_size: None,
+                }
+            }
+            Backend::Kimi => {
+                let desc = self.fields[1].trim().to_string();
+                let base_url = self.fields[2].trim().to_string();
+                let api_key = self.fields[3].trim().to_string();
+                let model = self.fields[4].trim().to_string();
+                let context = self.fields[5].trim().to_string();
+                NewProfile {
+                    name,
+                    description: if desc.is_empty() { None } else { Some(desc) },
+                    base_url: if base_url.is_empty() {
+                        None
+                    } else {
+                        Some(base_url)
+                    },
+                    api_key: if api_key.is_empty() {
+                        None
+                    } else {
+                        Some(api_key)
+                    },
+                    model: if model.is_empty() { None } else { Some(model) },
+                    fast_model: None,
+                    backend: Backend::Kimi,
+                    full_auto: None,
+                    auth_type: None,
+                    max_context_size: if context.is_empty() {
+                        None
+                    } else {
+                        Some(context)
+                    },
                 }
             }
         }
@@ -340,6 +403,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: None,
+            max_context_size: None,
         }
     }
 
@@ -423,6 +487,19 @@ mod tests {
         assert_eq!(
             codex_labels,
             ["Name *", "Base URL", "API Key", "Model", "Approval", ""]
+        );
+
+        let kimi_labels = field_labels(&Backend::Kimi);
+        assert_eq!(
+            kimi_labels,
+            [
+                "Name *",
+                "Description",
+                "Base URL",
+                "API Key",
+                "Model",
+                "Context (1m/260k)"
+            ]
         );
     }
 
@@ -524,6 +601,7 @@ mod tests {
             base_url: Some("https://example.com/v1".into()),
             full_auto: None,
             auth_type: None,
+            max_context_size: None,
         };
 
         let form = FormState::from_profile(&profile);
@@ -561,6 +639,7 @@ mod tests {
             base_url: Some("https://api.openai.com/v1".into()),
             full_auto: Some(crate::config::ApprovalLevel::Danger),
             auth_type: None,
+            max_context_size: None,
         };
 
         let form = FormState::from_profile(&profile);
@@ -664,6 +743,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: Some("token".into()),
+            max_context_size: None,
         };
         let form = FormState::from_profile(&profile);
         assert_eq!(form.auth_type.as_deref(), Some("token"));
@@ -679,5 +759,100 @@ mod tests {
         let np = form.to_new_profile();
         assert_eq!(np.auth_type.as_deref(), Some("token"));
         assert_eq!(np.api_key.as_deref(), Some("sk-key"));
+    }
+
+    #[test]
+    fn kimi_form_field_mapping_matches_labels() {
+        use crate::config::Backend;
+        let labels = field_labels(&Backend::Kimi);
+
+        let mut form = FormState::new();
+        form.backend = Backend::Kimi;
+        form.fields[0] = "my-kimi".into(); // labels[0] = "Name *"
+        form.fields[1] = "Kimi profile".into(); // labels[1] = "Description"
+        form.fields[2] = "https://api.kimi.com/v1".into(); // labels[2] = "Base URL"
+        form.fields[3] = "sk-kimi-key".into(); // labels[3] = "API Key"
+        form.fields[4] = "k3".into(); // labels[4] = "Model"
+        form.fields[5] = "1m".into(); // labels[5] = "Context (1m/260k)"
+
+        let np = form.to_new_profile();
+
+        assert!(labels[0].contains("Name"));
+        assert_eq!(np.name, "my-kimi");
+
+        assert!(labels[1].contains("Description"));
+        assert_eq!(np.description.as_deref(), Some("Kimi profile"));
+
+        assert!(labels[2].contains("Base URL"));
+        assert_eq!(np.base_url.as_deref(), Some("https://api.kimi.com/v1"));
+
+        assert!(labels[3].contains("Key"));
+        assert_eq!(np.api_key.as_deref(), Some("sk-kimi-key"));
+
+        assert!(labels[4].contains("Model"));
+        assert_eq!(np.model.as_deref(), Some("k3"));
+
+        assert!(labels[5].contains("Context"));
+        assert_eq!(np.max_context_size.as_deref(), Some("1m"));
+
+        assert_eq!(np.backend, Backend::Kimi);
+        assert!(np.fast_model.is_none());
+        assert!(np.full_auto.is_none());
+        assert!(np.auth_type.is_none());
+    }
+
+    #[test]
+    fn kimi_form_empty_context_maps_to_none() {
+        use crate::config::Backend;
+        let mut form = FormState::new();
+        form.backend = Backend::Kimi;
+        form.fields[0] = "my-kimi".into();
+
+        let np = form.to_new_profile();
+        assert!(np.max_context_size.is_none());
+    }
+
+    #[test]
+    fn from_profile_kimi_prefills_fields() {
+        use std::collections::HashMap;
+
+        let mut env = HashMap::new();
+        env.insert("ANTHROPIC_API_KEY".into(), "sk-kimi-123".into());
+        env.insert("ANTHROPIC_BASE_URL".into(), "https://env.example/v1".into());
+        let profile = Profile {
+            name: "kimi-edit".into(),
+            description: Some("Kimi profile".into()),
+            env: Some(env),
+            extra_args: None,
+            skip_permissions: None,
+            model: Some("kimi-k2".into()),
+            backend: Backend::Kimi,
+            base_url: None,
+            full_auto: None,
+            auth_type: None,
+            max_context_size: Some("260k".into()),
+        };
+
+        let form = FormState::from_profile(&profile);
+
+        assert!(form.is_edit);
+        assert_eq!(form.original_name.as_deref(), Some("kimi-edit"));
+        assert_eq!(form.backend, Backend::Kimi);
+        assert_eq!(
+            form.fields,
+            [
+                "kimi-edit".to_string(),
+                "Kimi profile".to_string(),
+                "https://env.example/v1".to_string(), // falls back to env
+                "sk-kimi-123".to_string(),
+                "kimi-k2".to_string(),
+                "260k".to_string(),
+            ]
+        );
+
+        // Round-trip: editing without changes preserves max_context_size
+        let np = form.to_new_profile();
+        assert_eq!(np.max_context_size.as_deref(), Some("260k"));
+        assert_eq!(np.backend, Backend::Kimi);
     }
 }

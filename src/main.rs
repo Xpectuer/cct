@@ -34,6 +34,9 @@ enum Commands {
         /// Auth type: "api_key" (default) or "token" (uses ANTHROPIC_AUTH_TOKEN)
         #[arg(long)]
         auth_type: Option<String>,
+        /// Backend: "claude" (default), "codex", or "kimi"
+        #[arg(long)]
+        backend: Option<String>,
     },
     /// Open profiles.toml in $EDITOR
     Edit,
@@ -59,6 +62,8 @@ fn main() -> Result<()> {
     config::ensure_default_config()?;
     // Ignore errors — non-fatal if the codex profile can't be ensured
     let _ = config::ensure_codex_profile();
+    // Ignore errors — non-fatal if the kimi profile can't be ensured
+    let _ = config::ensure_kimi_profile();
 
     // Ignore errors — failing to set onboarding is non-fatal
     let _ = launch::ensure_claude_onboarding();
@@ -67,9 +72,16 @@ fn main() -> Result<()> {
         launch::prompt_install()?;
     }
 
+    // Non-blocking: kimi is optional, only warn if missing
+    if !launch::check_kimi_installed() {
+        eprintln!(
+            "Note: `kimi` CLI not found in PATH. Install it with:\n  curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash"
+        );
+    }
+
     let args = Cli::parse();
     match args.command {
-        Some(Commands::Add { auth_type }) => cli::run_add(auth_type),
+        Some(Commands::Add { auth_type, backend }) => cli::run_add(auth_type, backend),
         Some(Commands::Edit) => launch::open_editor(&config::config_path()),
         Some(Commands::Run { name }) => run_profile(name),
         Some(Commands::Env {
@@ -97,6 +109,7 @@ fn run_profile(name: Option<String>) -> Result<()> {
     let err = match profile.backend {
         config::Backend::Claude => launch::exec_claude(&profile, false),
         config::Backend::Codex => launch::exec_codex(&profile),
+        config::Backend::Kimi => launch::exec_kimi(&profile),
     };
     eprintln!("Error: {err:#}");
     std::process::exit(1);
@@ -113,6 +126,7 @@ fn run_env(profile_name: Option<&str>, command: &[String]) -> Result<()> {
             let tag = match p.backend {
                 config::Backend::Claude => "[claude]",
                 config::Backend::Codex => "[codex] ",
+                config::Backend::Kimi => "[kimi]  ",
             };
             let desc = p.description.as_deref().unwrap_or("");
             println!("{}  {}  {}", p.name, tag, desc);
@@ -254,11 +268,12 @@ fn run_tui() -> Result<()> {
                     (KeyCode::Down, _) | (KeyCode::Char('j'), _) => app.next(),
                     (KeyCode::Up, _) | (KeyCode::Char('k'), _) => app.prev(),
                     (KeyCode::Tab, _) => {
-                        let opposite = match app.active_backend {
+                        let next = match app.active_backend {
                             config::Backend::Claude => config::Backend::Codex,
-                            config::Backend::Codex => config::Backend::Claude,
+                            config::Backend::Codex => config::Backend::Kimi,
+                            config::Backend::Kimi => config::Backend::Claude,
                         };
-                        app.switch_backend(opposite);
+                        app.switch_backend(next);
                     }
                     (KeyCode::Char('1'), _) => {
                         app.switch_backend(config::Backend::Claude);
@@ -266,12 +281,16 @@ fn run_tui() -> Result<()> {
                     (KeyCode::Char('2'), _) => {
                         app.switch_backend(config::Backend::Codex);
                     }
+                    (KeyCode::Char('3'), _) => {
+                        app.switch_backend(config::Backend::Kimi);
+                    }
                     (KeyCode::Enter, _) if !app.profiles.is_empty() => {
                         launch::restore_terminal();
                         let profile = &app.profiles[app.selected];
                         let err = match profile.backend {
                             config::Backend::Claude => launch::exec_claude(profile, false),
                             config::Backend::Codex => launch::exec_codex(profile),
+                            config::Backend::Kimi => launch::exec_kimi(profile),
                         };
                         eprintln!("Error: {err:#}");
                         std::process::exit(1);
@@ -315,6 +334,7 @@ fn run_tui() -> Result<()> {
                                     }
                                 }
                             }
+                            config::Backend::Kimi => {}
                         }
                     }
                     (KeyCode::Char('t'), _) if !app.profiles.is_empty() => {
@@ -362,6 +382,7 @@ fn run_tui() -> Result<()> {
                                     }
                                 }
                             }
+                            config::Backend::Kimi => {}
                         }
                     }
                     (KeyCode::Char('a'), _) => {
@@ -369,6 +390,31 @@ fn run_tui() -> Result<()> {
                     }
                     (KeyCode::Char('d'), _) => {
                         enter_duplicate_mode(&mut app);
+                    }
+                    (KeyCode::Char(' '), _) if !app.profiles.is_empty() => {
+                        let profile = &app.profiles[app.selected];
+                        if profile.backend == config::Backend::Kimi {
+                            match config::toggle_kimi_max_context_size(&profile.name) {
+                                Ok(()) => match config::load_profiles() {
+                                    Ok(updated) => {
+                                        if let Some(up) = updated
+                                            .into_iter()
+                                            .find(|p| p.name.eq_ignore_ascii_case(&profile.name))
+                                        {
+                                            app.profiles[app.selected] = up;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!(
+                                            "Warning: reload after context toggle failed: {e:#}"
+                                        );
+                                    }
+                                },
+                                Err(e) => {
+                                    eprintln!("Warning: context toggle failed: {e:#}");
+                                }
+                            }
+                        }
                     }
                     _ => {}
                 },
@@ -467,8 +513,23 @@ mod tests {
     fn clap_routing_add_with_auth_type() {
         let cli = Cli::try_parse_from(["cct", "add", "--auth-type", "token"]).unwrap();
         match cli.command {
-            Some(Commands::Add { auth_type }) => assert_eq!(auth_type.as_deref(), Some("token")),
+            Some(Commands::Add { auth_type, backend }) => {
+                assert_eq!(auth_type.as_deref(), Some("token"));
+                assert!(backend.is_none());
+            }
             _ => panic!("expected Add command with auth_type"),
+        }
+    }
+
+    #[test]
+    fn clap_routing_add_with_backend() {
+        let cli = Cli::try_parse_from(["cct", "add", "--backend", "kimi"]).unwrap();
+        match cli.command {
+            Some(Commands::Add { auth_type, backend }) => {
+                assert!(auth_type.is_none());
+                assert_eq!(backend.as_deref(), Some("kimi"));
+            }
+            _ => panic!("expected Add command with backend"),
         }
     }
 
@@ -593,6 +654,7 @@ mod tests {
             base_url: Some("https://example.com/v1".into()),
             full_auto: None,
             auth_type: None,
+            max_context_size: None,
         };
         let mut app = App::new(vec![profile]);
 
@@ -625,6 +687,7 @@ mod tests {
             base_url: Some("https://example.com/v1".into()),
             full_auto: None,
             auth_type: None,
+            max_context_size: None,
         };
         let mut app = App::new(vec![profile]);
 
@@ -658,6 +721,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: None,
+            max_context_size: None,
         };
         let mut app = App::new(vec![profile]);
 
@@ -685,6 +749,7 @@ mod tests {
                 base_url: None,
                 full_auto: None,
                 auth_type: None,
+                max_context_size: None,
             },
             Profile {
                 name: "beta".into(),
@@ -697,6 +762,7 @@ mod tests {
                 base_url: None,
                 full_auto: None,
                 auth_type: None,
+                max_context_size: None,
             },
         ];
 

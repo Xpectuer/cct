@@ -1,0 +1,26 @@
+diff --git a/src/config.rs b/src/config.rs
+--- a/src/config.rs
++++ b/src/config.rs
+@@ ... @@
+     #[default]
+     Claude,
+     Codex,
++    Kimi,
++}
++
++/// Default max_context_size for Kimi profiles. Auto-detected from model:
++/// `k3*` → "1m" (1,000,000), otherwise → "260k" (262,144).
++pub fn default_max_context_size(model: Option<&str>) -> &'static str {
++    match model {
++        Some(m) if m.starts_with("k3") => "1m",
++        _ => "260k",
++    }
++}
++
++/// Resolve max_context_size label to the numeric value for kimi config.
++pub fn resolve_max_context_size(size: Option<&str>) -> u64 {
++    match size {
++        Some("1m") => 1_000_000,
++        _ => 262_144,
++    }
+ }

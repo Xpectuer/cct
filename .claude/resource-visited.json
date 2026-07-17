@@ -1,0 +1,260 @@
+{
+  "sessions": {
+    "dc7ade0e-93a8-4df3-be69-e8c5dca74e1a": {
+      "started": "2026-07-13T08:38:31Z",
+      "resources": {
+        "rules/assert-contracts-not-incidental-platform-strings": "2026-07-13T08:38:31Z",
+        "rules/cross-module-features-need-contract-tests": "2026-07-13T08:38:31Z",
+        "rules/hotkey-ui-changes-must-be-discoverable": "2026-07-13T08:38:31Z",
+        "rules/kiss": "2026-07-13T08:38:31Z",
+        "rules/mask-secrets-on-every-display-path": "2026-07-13T08:38:31Z",
+        "rules/preserve-user-edited-config-structure": "2026-07-13T08:38:31Z",
+        "rules/pure-builders-thin-effectful-edges": "2026-07-13T08:38:31Z",
+        "rules/single-source-of-truth-variant-mappings": "2026-07-13T08:38:31Z",
+        "rules/test-boundaries-with-stubs-before-manual-verification": "2026-07-13T08:38:31Z",
+        "rules/tui-cli-sync": "2026-07-13T08:38:31Z",
+        "rules/update-docs-after-new-feature": "2026-07-13T08:38:31Z"
+      }
+    },
+    "41eb10da-9c28-40e0-a939-db1b120d0799": {
+      "started": "2026-07-13T08:40:27Z",
+      "resources": {
+        "rules/assert-contracts-not-incidental-platform-strings": "2026-07-13T08:40:27Z",
+        "rules/cross-module-features-need-contract-tests": "2026-07-13T08:40:27Z",
+        "rules/hotkey-ui-changes-must-be-discoverable": "2026-07-13T08:40:27Z",
+        "rules/kiss": "2026-07-13T08:40:27Z",
+        "rules/mask-secrets-on-every-display-path": "2026-07-13T08:40:27Z",
+        "rules/preserve-user-edited-config-structure": "2026-07-13T08:40:27Z",
+        "rules/pure-builders-thin-effectful-edges": "2026-07-13T08:40:27Z",
+        "rules/single-source-of-truth-variant-mappings": "2026-07-13T08:40:27Z",
+        "rules/test-boundaries-with-stubs-before-manual-verification": "2026-07-13T08:40:27Z",
+        "rules/tui-cli-sync": "2026-07-13T08:40:27Z",
+        "rules/update-docs-after-new-feature": "2026-07-13T08:40:27Z"
+      }
+    },
+    "434d7924-68a9-4320-9c47-0dc8e89caccc": {
+      "started": "2026-07-13T09:28:12Z",
+      "resources": {
+        "rules/assert-contracts-not-incidental-platform-strings": "2026-07-13T09:28:12Z",
+        "rules/cross-module-features-need-contract-tests": "2026-07-13T09:28:12Z",
+        "rules/hotkey-ui-changes-must-be-discoverable": "2026-07-13T09:28:12Z",
+        "rules/kiss": "2026-07-13T09:28:12Z",
+        "rules/mask-secrets-on-every-display-path": "2026-07-13T09:28:12Z",
+        "rules/preserve-user-edited-config-structure": "2026-07-13T09:28:12Z",
+        "rules/pure-builders-thin-effectful-edges": "2026-07-13T09:28:12Z",
+        "rules/single-source-of-truth-variant-mappings": "2026-07-13T09:28:12Z",
+        "rules/test-boundaries-with-stubs-before-manual-verification": "2026-07-13T09:28:12Z",
+        "rules/tui-cli-sync": "2026-07-13T09:28:12Z",
+        "rules/update-docs-after-new-feature": "2026-07-13T09:28:12Z"
+      }
+    },
+    "f5e72817-9006-4462-8c29-b3f5ee8b1181": {
+      "started": "2026-07-13T09:37:47Z",
+      "resources": {
+        "rules/assert-contracts-not-incidental-platform-strings": "2026-07-13T09:37:47Z",
+        "rules/cross-module-features-need-contract-tests": "2026-07-13T09:37:47Z",
+        "rules/hotkey-ui-changes-must-be-discoverable": "2026-07-13T09:37:47Z",
+        "rules/kiss": "2026-07-13T09:37:47Z",
+        "rules/mask-secrets-on-every-display-path": "2026-07-13T09:37:47Z",
+        "rules/preserve-user-edited-config-structure": "2026-07-13T09:37:47Z",
+        "rules/pure-builders-thin-effectful-edges": "2026-07-13T09:37:47Z",
+        "rules/single-source-of-truth-variant-mappings": "2026-07-13T09:37:47Z",
+        "rules/test-boundaries-with-stubs-before-manual-verification": "2026-07-13T09:37:47Z",
+        "rules/tui-cli-sync": "2026-07-13T09:37:47Z",
+        "rules/update-docs-after-new-feature": "2026-07-13T09:37:47Z"
+      }
+    },
+    "6de17377-1139-40de-89a1-9b23e09dda69": {
+      "started": "2026-07-13T10:04:32Z",
+      "resources": {
+        "rules/assert-contracts-not-incidental-platform-strings": "2026-07-13T10:04:32Z",
+        "rules/cross-module-features-need-contract-tests": "2026-07-13T10:04:32Z",
+        "rules/hotkey-ui-changes-must-be-discoverable": "2026-07-13T10:04:32Z",
+        "rules/kiss": "2026-07-13T10:04:32Z",
+        "rules/mask-secrets-on-every-display-path": "2026-07-13T10:04:32Z",
+        "rules/preserve-user-edited-config-structure": "2026-07-13T10:04:32Z",
+        "rules/pure-builders-thin-effectful-edges": "2026-07-13T10:04:32Z",
+        "rules/single-source-of-truth-variant-mappings": "2026-07-13T10:04:32Z",
+        "rules/test-boundaries-with-stubs-before-manual-verification": "2026-07-13T10:04:32Z",
+        "rules/tui-cli-sync": "2026-07-13T10:04:32Z",
+        "rules/update-docs-after-new-feature": "2026-07-13T10:04:32Z"
+      }
+    },
+    "369a9345-e7ee-4f54-95d6-2cc5d802cffa": {
+      "started": "2026-07-13T10:17:01Z",
+      "resources": {
+        "rules/assert-contracts-not-incidental-platform-strings": "2026-07-13T10:17:01Z",
+        "rules/cross-module-features-need-contract-tests": "2026-07-13T10:17:01Z",
+        "rules/hotkey-ui-changes-must-be-discoverable": "2026-07-13T10:17:01Z",
+        "rules/kiss": "2026-07-13T10:17:01Z",
+        "rules/mask-secrets-on-every-display-path": "2026-07-13T10:17:01Z",
+        "rules/preserve-user-edited-config-structure": "2026-07-13T10:17:01Z",
+        "rules/pure-builders-thin-effectful-edges": "2026-07-13T10:17:01Z",
+        "rules/single-source-of-truth-variant-mappings": "2026-07-13T10:17:01Z",
+        "rules/test-boundaries-with-stubs-before-manual-verification": "2026-07-13T10:17:01Z",
+        "rules/tui-cli-sync": "2026-07-13T10:17:01Z",
+        "rules/update-docs-after-new-feature": "2026-07-13T10:17:01Z"
+      }
+    },
+    "358aaae4-d154-4f45-86a2-bdc6b7ca4915": {
+      "started": "2026-07-15T06:26:59Z",
+      "resources": {
+        "rules/assert-contracts-not-incidental-platform-strings": "2026-07-15T06:26:59Z",
+        "rules/cross-module-features-need-contract-tests": "2026-07-15T06:26:59Z",
+        "rules/hotkey-ui-changes-must-be-discoverable": "2026-07-15T06:26:59Z",
+        "rules/kiss": "2026-07-15T06:26:59Z",
+        "rules/mask-secrets-on-every-display-path": "2026-07-15T06:26:59Z",
+        "rules/preserve-user-edited-config-structure": "2026-07-15T06:26:59Z",
+        "rules/pure-builders-thin-effectful-edges": "2026-07-15T06:26:59Z",
+        "rules/single-source-of-truth-variant-mappings": "2026-07-15T06:26:59Z",
+        "rules/test-boundaries-with-stubs-before-manual-verification": "2026-07-15T06:26:59Z",
+        "rules/tui-cli-sync": "2026-07-15T06:26:59Z",
+        "rules/update-docs-after-new-feature": "2026-07-15T06:26:59Z"
+      }
+    },
+    "930d9e1c-68ed-4b14-971f-348dcac5d7ae": {
+      "started": "2026-07-15T06:31:12Z",
+      "resources": {
+        "rules/assert-contracts-not-incidental-platform-strings": "2026-07-15T06:31:12Z",
+        "rules/cross-module-features-need-contract-tests": "2026-07-15T06:31:12Z",
+        "rules/hotkey-ui-changes-must-be-discoverable": "2026-07-15T06:31:12Z",
+        "rules/kiss": "2026-07-15T06:31:12Z",
+        "rules/mask-secrets-on-every-display-path": "2026-07-15T06:31:12Z",
+        "rules/preserve-user-edited-config-structure": "2026-07-15T06:31:12Z",
+        "rules/pure-builders-thin-effectful-edges": "2026-07-15T06:31:12Z",
+        "rules/single-source-of-truth-variant-mappings": "2026-07-15T06:31:12Z",
+        "rules/test-boundaries-with-stubs-before-manual-verification": "2026-07-15T06:31:12Z",
+        "rules/tui-cli-sync": "2026-07-15T06:31:12Z",
+        "rules/update-docs-after-new-feature": "2026-07-15T06:31:12Z"
+      }
+    },
+    "5166fbcf-6db4-42cd-a5a9-2da82b5b083c": {
+      "started": "2026-07-15T09:52:20Z",
+      "resources": {
+        "rules/assert-contracts-not-incidental-platform-strings": "2026-07-15T09:52:20Z",
+        "rules/cross-module-features-need-contract-tests": "2026-07-15T09:52:20Z",
+        "rules/hotkey-ui-changes-must-be-discoverable": "2026-07-15T09:52:20Z",
+        "rules/kiss": "2026-07-15T09:52:20Z",
+        "rules/mask-secrets-on-every-display-path": "2026-07-15T09:52:20Z",
+        "rules/preserve-user-edited-config-structure": "2026-07-15T09:52:20Z",
+        "rules/pure-builders-thin-effectful-edges": "2026-07-15T09:52:20Z",
+        "rules/single-source-of-truth-variant-mappings": "2026-07-15T09:52:20Z",
+        "rules/test-boundaries-with-stubs-before-manual-verification": "2026-07-15T09:52:20Z",
+        "rules/tui-cli-sync": "2026-07-15T09:52:20Z",
+        "rules/update-docs-after-new-feature": "2026-07-15T09:52:20Z"
+      }
+    },
+    "94995639-ee98-45ba-9e96-19bc9b363fdb": {
+      "started": "2026-07-15T09:56:35Z",
+      "resources": {
+        "rules/assert-contracts-not-incidental-platform-strings": "2026-07-15T09:56:35Z",
+        "rules/cross-module-features-need-contract-tests": "2026-07-15T09:56:35Z",
+        "rules/hotkey-ui-changes-must-be-discoverable": "2026-07-15T09:56:35Z",
+        "rules/kiss": "2026-07-15T09:56:35Z",
+        "rules/mask-secrets-on-every-display-path": "2026-07-15T09:56:35Z",
+        "rules/preserve-user-edited-config-structure": "2026-07-15T09:56:35Z",
+        "rules/pure-builders-thin-effectful-edges": "2026-07-15T09:56:35Z",
+        "rules/single-source-of-truth-variant-mappings": "2026-07-15T09:56:35Z",
+        "rules/test-boundaries-with-stubs-before-manual-verification": "2026-07-15T09:56:35Z",
+        "rules/tui-cli-sync": "2026-07-15T09:56:35Z",
+        "rules/update-docs-after-new-feature": "2026-07-15T09:56:35Z"
+      }
+    },
+    "6ebcff4c-0b7f-4035-a428-9e3b731a9ae0": {
+      "started": "2026-07-15T09:58:47Z",
+      "resources": {
+        "rules/assert-contracts-not-incidental-platform-strings": "2026-07-15T09:58:47Z",
+        "rules/cross-module-features-need-contract-tests": "2026-07-15T09:58:47Z",
+        "rules/hotkey-ui-changes-must-be-discoverable": "2026-07-15T09:58:47Z",
+        "rules/kiss": "2026-07-15T09:58:47Z",
+        "rules/mask-secrets-on-every-display-path": "2026-07-15T09:58:47Z",
+        "rules/preserve-user-edited-config-structure": "2026-07-15T09:58:47Z",
+        "rules/pure-builders-thin-effectful-edges": "2026-07-15T09:58:47Z",
+        "rules/single-source-of-truth-variant-mappings": "2026-07-15T09:58:47Z",
+        "rules/test-boundaries-with-stubs-before-manual-verification": "2026-07-15T09:58:47Z",
+        "rules/tui-cli-sync": "2026-07-15T09:58:47Z",
+        "rules/update-docs-after-new-feature": "2026-07-15T09:58:47Z"
+      }
+    },
+    "804392a2-21cf-4ffa-a3e1-d167f93d88d3": {
+      "started": "2026-07-15T10:08:06Z",
+      "resources": {
+        "rules/assert-contracts-not-incidental-platform-strings": "2026-07-15T10:08:06Z",
+        "rules/cross-module-features-need-contract-tests": "2026-07-15T10:08:06Z",
+        "rules/hotkey-ui-changes-must-be-discoverable": "2026-07-15T10:08:06Z",
+        "rules/kiss": "2026-07-15T10:08:06Z",
+        "rules/mask-secrets-on-every-display-path": "2026-07-15T10:08:06Z",
+        "rules/preserve-user-edited-config-structure": "2026-07-15T10:08:06Z",
+        "rules/pure-builders-thin-effectful-edges": "2026-07-15T10:08:06Z",
+        "rules/single-source-of-truth-variant-mappings": "2026-07-15T10:08:06Z",
+        "rules/test-boundaries-with-stubs-before-manual-verification": "2026-07-15T10:08:06Z",
+        "rules/tui-cli-sync": "2026-07-15T10:08:06Z",
+        "rules/update-docs-after-new-feature": "2026-07-15T10:08:06Z"
+      }
+    },
+    "04c2b168-7f0a-4dc3-82a0-e211b4427c3a": {
+      "started": "2026-07-17T03:26:46Z",
+      "resources": {
+        "rules/assert-contracts-not-incidental-platform-strings": "2026-07-17T03:26:46Z",
+        "rules/cross-module-features-need-contract-tests": "2026-07-17T03:26:46Z",
+        "rules/hotkey-ui-changes-must-be-discoverable": "2026-07-17T03:26:46Z",
+        "rules/kiss": "2026-07-17T03:26:46Z",
+        "rules/mask-secrets-on-every-display-path": "2026-07-17T03:26:46Z",
+        "rules/preserve-user-edited-config-structure": "2026-07-17T03:26:46Z",
+        "rules/pure-builders-thin-effectful-edges": "2026-07-17T03:26:46Z",
+        "rules/single-source-of-truth-variant-mappings": "2026-07-17T03:26:46Z",
+        "rules/test-boundaries-with-stubs-before-manual-verification": "2026-07-17T03:26:46Z",
+        "rules/tui-cli-sync": "2026-07-17T03:26:46Z",
+        "rules/update-docs-after-new-feature": "2026-07-17T03:26:46Z"
+      }
+    },
+    "e27f3552-abcc-4d9d-9339-58f52063479a": {
+      "started": "2026-07-17T05:33:18Z",
+      "resources": {
+        "rules/assert-contracts-not-incidental-platform-strings": "2026-07-17T05:33:18Z",
+        "rules/cross-module-features-need-contract-tests": "2026-07-17T05:33:18Z",
+        "rules/hotkey-ui-changes-must-be-discoverable": "2026-07-17T05:33:18Z",
+        "rules/kiss": "2026-07-17T05:33:18Z",
+        "rules/mask-secrets-on-every-display-path": "2026-07-17T05:33:18Z",
+        "rules/preserve-user-edited-config-structure": "2026-07-17T05:33:18Z",
+        "rules/pure-builders-thin-effectful-edges": "2026-07-17T05:33:18Z",
+        "rules/single-source-of-truth-variant-mappings": "2026-07-17T05:33:18Z",
+        "rules/test-boundaries-with-stubs-before-manual-verification": "2026-07-17T05:33:18Z",
+        "rules/tui-cli-sync": "2026-07-17T05:33:18Z",
+        "rules/update-docs-after-new-feature": "2026-07-17T05:33:18Z"
+      }
+    },
+    "6d21f862-9d8f-4d5a-8d9f-5f36bbf9d970": {
+      "started": "2026-07-17T06:10:57Z",
+      "resources": {
+        "rules/assert-contracts-not-incidental-platform-strings": "2026-07-17T06:10:57Z",
+        "rules/cross-module-features-need-contract-tests": "2026-07-17T06:10:57Z",
+        "rules/hotkey-ui-changes-must-be-discoverable": "2026-07-17T06:10:57Z",
+        "rules/kiss": "2026-07-17T06:10:57Z",
+        "rules/mask-secrets-on-every-display-path": "2026-07-17T06:10:57Z",
+        "rules/preserve-user-edited-config-structure": "2026-07-17T06:10:57Z",
+        "rules/pure-builders-thin-effectful-edges": "2026-07-17T06:10:57Z",
+        "rules/single-source-of-truth-variant-mappings": "2026-07-17T06:10:57Z",
+        "rules/test-boundaries-with-stubs-before-manual-verification": "2026-07-17T06:10:57Z",
+        "rules/tui-cli-sync": "2026-07-17T06:10:57Z",
+        "rules/update-docs-after-new-feature": "2026-07-17T06:10:57Z"
+      }
+    },
+    "d4069ea0-6edc-4ed4-99e0-0309ef9c6674": {
+      "started": "2026-07-17T08:18:13Z",
+      "resources": {
+        "rules/assert-contracts-not-incidental-platform-strings": "2026-07-17T08:18:13Z",
+        "rules/cross-module-features-need-contract-tests": "2026-07-17T08:18:13Z",
+        "rules/hotkey-ui-changes-must-be-discoverable": "2026-07-17T08:18:13Z",
+        "rules/kiss": "2026-07-17T08:18:13Z",
+        "rules/mask-secrets-on-every-display-path": "2026-07-17T08:18:13Z",
+        "rules/preserve-user-edited-config-structure": "2026-07-17T08:18:13Z",
+        "rules/pure-builders-thin-effectful-edges": "2026-07-17T08:18:13Z",
+        "rules/single-source-of-truth-variant-mappings": "2026-07-17T08:18:13Z",
+        "rules/test-boundaries-with-stubs-before-manual-verification": "2026-07-17T08:18:13Z",
+        "rules/tui-cli-sync": "2026-07-17T08:18:13Z",
+        "rules/update-docs-after-new-feature": "2026-07-17T08:18:13Z"
+      }
+    }
+  }
+}
