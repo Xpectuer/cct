@@ -34,6 +34,7 @@ revision: 1
 | tdd-config-add-env-20260303164823 | docs/drafts/intake-20260303000100 | 7/7 (100%) | completed | 2026-03-03 |
 | tdd-continue-key-20260312172244 | docs/drafts/intake-20260312120000 | 5/5 (100%) | completed | 2026-03-12 |
 | tdd-install-script-20260310150440 | docs/drafts/intake-20260310120000 | 9/9 (100%) | completed | 2026-03-10 |
+| codex-p0-fixes-20260801004822 | — | 6/6 (100%) | completed | 2026-08-01 |
 
 ---
-Updated: 2026-03-14
+Updated: 2026-08-01

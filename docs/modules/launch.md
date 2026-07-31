@@ -56,10 +56,21 @@ updated: 2026-07-17
     [model_providers.custom]
     name = "<profile.name>"
     base_url = "<profile.base_url or empty string>"
+    requires_openai_auth = true
+    [features]
+    default_mode_request_user_input = true
     ```
   - Creates parent directories if they do not exist.
-  - Multiple codex profiles share one config file; it is fully rewritten before each codex launch.
+  - **Surgical merge, not full rewrite**: an existing `config.toml` is parsed with `toml_edit` and only the cct-owned keys are refreshed (`model_provider`, `model`, `model_providers.custom.*`). Hand-edited sections (`[features]`, `[projects]`, …) survive the next launch.
+  - `[features] default_mode_request_user_input = true` is written only when absent, so an explicit user override wins.
+  - Nested tables are created explicitly (`ensure_subtable`) so they render as header-style sections (`[model_providers.custom]`), not inline tables, and values from profile fields are TOML-escaped by `toml_edit`.
   - `codex_home` is separated from the function body (testable with a temp dir).
+
+- `pub fn write_codex_auth(profile: &Profile, codex_home: &Path) -> Result<()>`
+  - Writes `<codex_home>/auth.json` with `{"auth_mode": "apikey", "OPENAI_API_KEY": "<env.OPENAI_API_KEY>"}` when the profile has a key.
+  - Generated with `serde_json` (keys are properly escaped).
+  - When the profile has no key, a stale `auth.json` from an earlier launch is **removed** — an old key must not keep being served after the profile's key is dropped.
+  - The codex API key may also be written at the profile top level (`api_key = "..."`); `config::Profile`'s deserializer injects it into `env.OPENAI_API_KEY` for Codex profiles.
 
 - `pub fn build_codex_args(profile: &Profile) -> Vec<String>`
   - Pure function with no side effects.
@@ -69,11 +80,12 @@ updated: 2026-07-17
 - `pub fn exec_codex(profile: &Profile) -> anyhow::Error`
   - Steps performed before exec-replace:
     1. Checks `codex` binary is installed via `check_codex_installed()`; returns error if not.
-    2. Resolves `codex_home` to `~/.config/cct-tui/codex/` via `dirs::config_dir()`.
+    2. Resolves `codex_home` to `~/.config/cc-tui/codex/<profile-name>` via `dirs::config_dir()` (per-profile `CODEX_HOME`).
     3. Calls `generate_codex_config(profile, &codex_home)` to write `config.toml`; returns error on failure.
-    4. Sets `CODEX_HOME` environment variable to `codex_home`.
-    5. Injects all key-value pairs from `profile.env` (contains `OPENAI_API_KEY`).
-    6. Exec-replaces with `codex <build_codex_args(profile)>`.
+    4. Calls `write_codex_auth(profile, &codex_home)` to write (or clean up) `auth.json`; returns error on failure.
+    5. Sets `CODEX_HOME` environment variable to `codex_home`.
+    6. Injects all key-value pairs from `profile.env` (contains `OPENAI_API_KEY`).
+    7. Exec-replaces with `codex <build_codex_args(profile)>`.
   - **Never returns on success**.
 
 - `pub fn check_kimi_installed() -> bool`

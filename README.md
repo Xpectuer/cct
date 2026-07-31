@@ -99,6 +99,7 @@ backend = "codex"
 model = "gpt-4.1"
 base_url = "https://api.openai.com/v1"
 full_auto = false
+# api_key = "sk-..." — top-level shorthand, equivalent to env.OPENAI_API_KEY
 
 [profiles.env]
 OPENAI_API_KEY = "sk-..."

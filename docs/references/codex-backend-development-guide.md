@@ -176,12 +176,18 @@ model = "<profile.model or gpt-4.1>"
 name = "<profile.name>"
 base_url = "<profile.base_url or empty string>"
 requires_openai_auth = true
+
+[features]
+default_mode_request_user_input = true
 ```
 
-Important implementation detail:
+Important implementation details:
 
 - each profile gets its own `CODEX_HOME` directory under `~/.config/cc-tui/codex/<profile-name>`
 - this avoids cross-profile config clobbering
+- existing `config.toml` files are **merged surgically** (via `toml_edit`), not rewritten: only cct-owned keys are refreshed, so hand-edited sections like `[projects]` survive launches
+- `[features] default_mode_request_user_input = true` is written only when absent — an explicit user value is respected
+- the codex API key can be written either in the env block (`env.OPENAI_API_KEY`) or at the profile top level (`api_key = "..."`); both are honored, the top-level shorthand being injected into the env map at deserialization time
 
 ## Persisted Full-Auto Toggle
 
