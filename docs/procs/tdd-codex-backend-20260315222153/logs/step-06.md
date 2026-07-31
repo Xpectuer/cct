@@ -1,3 +1,12 @@
+---
+title: Step 6 — Update cli.rs for codex add flow
+doc_type: proc
+brief: Step 6 — Update cli.rs for codex add flow
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 # Step 6 — Update cli.rs for codex add flow
 
 ## Status: SUCCESS

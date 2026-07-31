@@ -1,3 +1,12 @@
+---
+title: Step 10
+doc_type: proc
+brief: Step 10
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 ## Step 10 — UI tests
 
 ### Red

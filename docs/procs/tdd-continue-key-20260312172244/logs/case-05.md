@@ -1,3 +1,12 @@
+---
+title: Case 05
+doc_type: proc
+brief: Case 05
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 ## Case 5 — ui_footer_shows_resume_hint
 
 ### Actions Taken

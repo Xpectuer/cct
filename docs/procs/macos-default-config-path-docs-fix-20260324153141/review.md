@@ -1,3 +1,12 @@
+---
+title: "Self-Review: macOS default config path documentation fix"
+doc_type: proc
+brief: Updated README.md and CLAUDE.md so the Quick Start and Project Overview/Config File Format sections explicitly docum
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 # Self-Review: macOS default config path documentation fix
 
 ## Summary

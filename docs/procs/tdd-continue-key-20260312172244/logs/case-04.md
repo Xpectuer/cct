@@ -1,3 +1,12 @@
+---
+title: Case 04
+doc_type: proc
+brief: Case 04
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 ## Case 4 — main_c_key_launches_with_continue
 
 ### Actions Taken

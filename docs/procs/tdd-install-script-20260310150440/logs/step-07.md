@@ -1,3 +1,12 @@
+---
+title: Step 07
+doc_type: proc
+brief: Step 07
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 ## Case 7 — install_binary_creates_dir_and_copies
 
 ### RED

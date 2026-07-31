@@ -1,3 +1,12 @@
+---
+title: Step 04
+doc_type: proc
+brief: Step 04
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 ## Step 4 — Cross-Check Acceptance Criteria
 
 ### Actions Taken

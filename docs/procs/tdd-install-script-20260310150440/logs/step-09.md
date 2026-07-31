@@ -1,3 +1,12 @@
+---
+title: Step 09
+doc_type: proc
+brief: Step 09
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 ## Case 9 — path_hint_silent_when_in_path
 
 ### RED

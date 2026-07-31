@@ -1,3 +1,12 @@
+---
+title: "Self-Review: musl Static Linking"
+doc_type: proc
+brief: Reviewed .github/workflows/release.yml against the plan in ref/plan.md. The workflow replaces the single x86_64-unk
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 # Self-Review: musl Static Linking
 
 ## Summary

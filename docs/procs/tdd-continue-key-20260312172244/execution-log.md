@@ -1,3 +1,12 @@
+---
+title: Execution Log
+doc_type: proc
+brief: | # | Case | Status | Notes | Timestamp |
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 # Execution Log
 
 | # | Case | Status | Notes | Timestamp |

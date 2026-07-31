@@ -1,3 +1,12 @@
+---
+title: "Execution Log: musl Static Linking"
+doc_type: proc
+brief: "Run date: 2026-03-14"
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 # Execution Log: musl Static Linking
 
 **Run date**: 2026-03-14

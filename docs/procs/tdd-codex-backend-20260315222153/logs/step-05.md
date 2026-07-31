@@ -1,3 +1,12 @@
+---
+title: Step 5 — Update main.rs event handling
+doc_type: proc
+brief: Step 5 — Update main.rs event handling
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 # Step 5 — Update main.rs event handling
 
 ## Status: SUCCESS

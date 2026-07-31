@@ -1,3 +1,12 @@
+---
+title: Step 08
+doc_type: proc
+brief: Step 08
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 ## Step 8 — check_claude_installed tests
 
 ### Red

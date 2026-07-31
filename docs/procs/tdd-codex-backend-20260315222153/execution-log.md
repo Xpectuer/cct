@@ -1,3 +1,12 @@
+---
+title: Execution Log — Codex Backend TDD
+doc_type: proc
+brief: | Step | Status | Notes |
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 # Execution Log — Codex Backend TDD
 
 | Step | Status | Notes |

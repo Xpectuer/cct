@@ -1,3 +1,12 @@
+---
+title: Step 06
+doc_type: proc
+brief: Step 06
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 ## Step 6 — Update README for inline edit
 ### Actions Taken
 - Replaced the stale feature bullet that described `e` as an external-editor hot-reload path.

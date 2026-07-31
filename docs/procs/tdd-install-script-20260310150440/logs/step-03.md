@@ -1,3 +1,12 @@
+---
+title: Step 03
+doc_type: proc
+brief: Step 03
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 ## Case 3 — detect_unsupported_os
 
 ### RED

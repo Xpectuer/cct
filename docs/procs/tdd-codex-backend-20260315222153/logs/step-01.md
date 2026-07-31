@@ -1,3 +1,12 @@
+---
+title: Step 01
+doc_type: proc
+brief: Step 01
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 ## Step 1 -- Backend enum, Profile fields, validation in config.rs
 
 ### Actions Taken

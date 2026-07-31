@@ -1,3 +1,12 @@
+---
+title: "Step 2: Filtered navigation in app.rs"
+doc_type: proc
+brief: "Status: SUCCESS"
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 # Step 2: Filtered navigation in app.rs
 
 **Status**: SUCCESS

@@ -1,3 +1,12 @@
+---
+title: Step 05
+doc_type: proc
+brief: Step 05
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 ## Case 5 — fetch_latest_fails_on_bad_response (MANUAL → stub)
 
 ### RED

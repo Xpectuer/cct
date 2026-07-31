@@ -1,3 +1,12 @@
+---
+title: INSTALL.md — Agent Installation Guide for cct
+doc_type: readme
+brief: This document provides automated installation instructions for AI coding agents. Each method is self-contained with prer
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 # INSTALL.md — Agent Installation Guide for cct
 
 This document provides automated installation instructions for AI coding agents. Each method is self-contained with prerequisite checks, the install command, and a verification step.

@@ -1,3 +1,12 @@
+---
+title: Step 06
+doc_type: proc
+brief: Step 06
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 ## Case 6 — download_retries_on_failure (MANUAL → stub)
 
 ### RED

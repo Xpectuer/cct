@@ -1,3 +1,12 @@
+---
+title: TUI-CLI Sync
+doc_type: rule
+brief: When adding or modifying a TUI feature (hotkey, toggle, setting, action on a profile), always review whether the CLI sur
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 # TUI-CLI Sync
 
 ## Rule

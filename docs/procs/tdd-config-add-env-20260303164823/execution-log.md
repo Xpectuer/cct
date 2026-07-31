@@ -1,3 +1,12 @@
+---
+title: Execution Log — Config Add Env Vars TDD
+doc_type: proc
+brief: "Proc: docs/procs/tdd-config-add-env-20260303164823"
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 # Execution Log — Config Add Env Vars TDD
 
 **Proc**: `docs/procs/tdd-config-add-env-20260303164823`

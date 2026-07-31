@@ -1,3 +1,12 @@
+---
+title: "Execution Log — TDD: cct install script"
+doc_type: proc
+brief: "Proc: docs/procs/tdd-install-script-20260310150440"
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 # Execution Log — TDD: cct install script
 
 **Proc**: docs/procs/tdd-install-script-20260310150440

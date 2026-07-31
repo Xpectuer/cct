@@ -1,3 +1,12 @@
+---
+title: Step 02
+doc_type: proc
+brief: Step 02
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 ## Case 2 — detect_macos_arm64
 
 ### RED

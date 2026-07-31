@@ -1,3 +1,12 @@
+---
+title: "Execution Log: macOS default config path documentation fix"
+doc_type: proc
+brief: "Run date: 2026-03-24"
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 # Execution Log: macOS default config path documentation fix
 
 **Run date**: 2026-03-24

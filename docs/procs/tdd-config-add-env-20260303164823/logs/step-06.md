@@ -1,3 +1,12 @@
+---
+title: Step 6 — Main TUI Save Logic
+doc_type: proc
+brief: "Case: 6 — Update AddForm confirmation handler and Enter-to-advance threshold"
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 # Step 6 — Main TUI Save Logic
 
 **Case**: 6 — Update AddForm confirmation handler and Enter-to-advance threshold

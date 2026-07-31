@@ -142,7 +142,7 @@ const DEFAULT_CONFIG: &str = r#"# cct — Claude Code TUI profile configuration
 [[profiles]]
 name = "default"
 description = "Default Claude Code"
-# model = "claude-sonnet-4-6"
+# model = "claude-opus-5"
 # skip_permissions = false
 # extra_args = []
 
@@ -383,6 +383,7 @@ pub fn update_profile(original_name: &str, updated: &NewProfile) -> Result<()> {
                         "ANTHROPIC_DEFAULT_SONNET_MODEL",
                         "ANTHROPIC_DEFAULT_OPUS_MODEL",
                         "CLAUDE_CODE_SUBAGENT_MODEL",
+                        "CLAUDE_CODE_AUTO_MODE_MODEL",
                     ] {
                         env[key] = value(model);
                     }
@@ -396,6 +397,7 @@ pub fn update_profile(original_name: &str, updated: &NewProfile) -> Result<()> {
                         "ANTHROPIC_DEFAULT_SONNET_MODEL",
                         "ANTHROPIC_DEFAULT_OPUS_MODEL",
                         "CLAUDE_CODE_SUBAGENT_MODEL",
+                        "CLAUDE_CODE_AUTO_MODE_MODEL",
                         "API_TIMEOUT_MS",
                         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
                         "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK",
@@ -461,6 +463,7 @@ pub fn update_profile(original_name: &str, updated: &NewProfile) -> Result<()> {
                 "ANTHROPIC_DEFAULT_SONNET_MODEL",
                 "ANTHROPIC_DEFAULT_OPUS_MODEL",
                 "CLAUDE_CODE_SUBAGENT_MODEL",
+                "CLAUDE_CODE_AUTO_MODE_MODEL",
                 "API_TIMEOUT_MS",
                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
                 "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK",
@@ -544,6 +547,7 @@ pub fn append_profile(profile: &NewProfile) -> Result<()> {
                     block.push_str(&format!("ANTHROPIC_DEFAULT_SONNET_MODEL = {:?}\n", m));
                     block.push_str(&format!("ANTHROPIC_DEFAULT_OPUS_MODEL = {:?}\n", m));
                     block.push_str(&format!("CLAUDE_CODE_SUBAGENT_MODEL = {:?}\n", m));
+                    block.push_str(&format!("CLAUDE_CODE_AUTO_MODE_MODEL = {:?}\n", m));
                     block.push_str("API_TIMEOUT_MS = \"600000\"\n");
                     block.push_str("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = \"1\"\n");
                     block.push_str("CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK = \"1\"\n");
@@ -822,7 +826,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             description: Some("A test".into()),
             base_url: None,
             api_key: None,
-            model: Some("claude-sonnet-4-6".into()),
+            model: Some("claude-opus-5".into()),
             fast_model: None,
             backend: Backend::Claude,
             full_auto: None,
@@ -971,6 +975,10 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
         assert!(
             content.contains("CLAUDE_CODE_SUBAGENT_MODEL"),
             "Expected CLAUDE_CODE_SUBAGENT_MODEL in output"
+        );
+        assert!(
+            content.contains("CLAUDE_CODE_AUTO_MODE_MODEL"),
+            "Expected CLAUDE_CODE_AUTO_MODE_MODEL in output"
         );
         assert!(
             content.contains("API_TIMEOUT_MS"),
@@ -1503,6 +1511,7 @@ ANTHROPIC_MODEL = "old-model"
 ANTHROPIC_DEFAULT_SONNET_MODEL = "old-model"
 ANTHROPIC_DEFAULT_OPUS_MODEL = "old-model"
 CLAUDE_CODE_SUBAGENT_MODEL = "old-model"
+CLAUDE_CODE_AUTO_MODE_MODEL = "old-model"
 API_TIMEOUT_MS = "600000"
 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
 CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK = "1"
@@ -1548,6 +1557,10 @@ CUSTOM_HEADER = "keep-me"
         );
         assert_eq!(
             env.get("CLAUDE_CODE_SUBAGENT_MODEL").map(String::as_str),
+            Some("new-model")
+        );
+        assert_eq!(
+            env.get("CLAUDE_CODE_AUTO_MODE_MODEL").map(String::as_str),
             Some("new-model")
         );
         assert_eq!(
@@ -2134,6 +2147,7 @@ description = "Second profile"
             "ANTHROPIC_DEFAULT_HAIKU_MODEL",
             "ANTHROPIC_SMALL_FAST_MODEL",
             "CLAUDE_CODE_SUBAGENT_MODEL",
+            "CLAUDE_CODE_AUTO_MODE_MODEL",
             "API_TIMEOUT_MS",
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
             "OPENAI_API_KEY",
@@ -2203,16 +2217,17 @@ description = "Second profile"
             &path,
             r#"[[profiles]]
 name = "switch-me"
-model = "claude-sonnet-4-6"
+model = "claude-opus-5"
 base_url = "https://old.example/v1"
 
 [profiles.env]
 ANTHROPIC_BASE_URL = "https://old.example/v1"
 ANTHROPIC_API_KEY = "sk-old"
-ANTHROPIC_MODEL = "claude-sonnet-4-6"
-ANTHROPIC_DEFAULT_SONNET_MODEL = "claude-sonnet-4-6"
-ANTHROPIC_DEFAULT_OPUS_MODEL = "claude-sonnet-4-6"
-CLAUDE_CODE_SUBAGENT_MODEL = "claude-sonnet-4-6"
+ANTHROPIC_MODEL = "claude-opus-5"
+ANTHROPIC_DEFAULT_SONNET_MODEL = "claude-opus-5"
+ANTHROPIC_DEFAULT_OPUS_MODEL = "claude-opus-5"
+CLAUDE_CODE_SUBAGENT_MODEL = "claude-opus-5"
+CLAUDE_CODE_AUTO_MODE_MODEL = "claude-opus-5"
 ANTHROPIC_DEFAULT_HAIKU_MODEL = "claude-haiku"
 ANTHROPIC_SMALL_FAST_MODEL = "claude-haiku"
 API_TIMEOUT_MS = "600000"

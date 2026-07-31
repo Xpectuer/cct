@@ -1,3 +1,12 @@
+---
+title: Step 02
+doc_type: proc
+brief: Step 02
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 ## Step 2 — Env var generation tests
 
 ### Red

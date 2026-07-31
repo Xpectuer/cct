@@ -38,7 +38,7 @@ updated: 2026-07-17
   - Used by integration tests to verify dispatch without exec-replacing the process.
 
 - `pub fn exec_claude(profile: &Profile, with_continue: bool) -> anyhow::Error`
-  - Applies a default set of Claude launch environment variables (`CLAUDE_DEFAULT_ENV`) — e.g. telemetry opt-outs, auto-updater disable, and attribution header off — then injects all key-value pairs from `profile.env` on top, so profile entries override defaults.
+  - Injects all key-value pairs from `profile.env` into the current process environment via `env::set_var`.
   - Calls `build_args(profile, with_continue)` then exec-replaces the current process with `claude <args>` using `std::os::unix::process::CommandExt::exec`.
   - `with_continue=true` prepends `--continue` to the arg list, resuming the last Claude Code session.
   - **Never returns on success** — the process image is replaced.
@@ -104,7 +104,7 @@ updated: 2026-07-17
   - Used by `run_env` to validate the user-supplied command before exec.
 
 - `pub fn exec_with_env(profile: &Profile, cmd: &str, args: &[String]) -> anyhow::Error`
-  - Applies the same default Claude launch environment variables as `exec_claude`, then injects all key-value pairs from `profile.env` on top.
+  - Injects all key-value pairs from `profile.env` into the current process environment via `env::set_var`.
   - Exec-replaces the current process with `<cmd> <args...>` using `std::os::unix::process::CommandExt::exec`.
   - **No shell is involved** — `$VAR` expansion, globs, and pipes do not work. Use `sh -c '...'` when shell features are needed.
   - **Never returns on success**.
@@ -158,7 +158,7 @@ None — all public surface is functions. The module consumes `crate::config::Pr
 
 - **`open_editor`** — Spawns a child process and blocks. Reads `$EDITOR` at call time but retains no state.
 
-- **`exec_claude`** — Two permanent side effects: (1) env mutation via `env::set_var` (default Claude env vars first, then `profile.env` overrides); (2) process replacement via `CommandExt::exec()`. Terminal cleanup (`restore_terminal`) must be called by the caller before `exec_claude`.
+- **`exec_claude`** — Two permanent side effects: (1) env mutation via `env::set_var`; (2) process replacement via `CommandExt::exec()`. Terminal cleanup (`restore_terminal`) must be called by the caller before `exec_claude`.
 
 - **`exec_codex`** — Four side effects before exec: (1) writes `~/.config/cct-tui/codex/config.toml`; (2) sets `CODEX_HOME` env var; (3) sets `OPENAI_API_KEY` from `profile.env`; (4) process replacement. `restore_terminal` must be called before `exec_codex`.
 
@@ -203,10 +203,6 @@ Callers must not assume any other ordering. Unit tests pin this contract: `build
 ### Environment Variable Injection Race
 
 `env::set_var` is not thread-safe in a multi-threaded program (it is `unsafe` in Rust editions that expose that). `cct` is single-threaded in its event loop, so this is safe in practice, but care must be taken if the architecture is ever extended to use background threads before the `exec` call.
-
-### Default Claude Env Vars vs. Profile Overrides
-
-`exec_claude` and `exec_with_env` first set a fixed list of default environment variables (`DISABLE_AUTOUPDATER=1`, telemetry opt-outs, attribution header off, etc.) and then apply `profile.env`. Any key present in both the default list and the profile's `[profiles.env]` table uses the profile value, so users can opt back into a default-disabled behavior on a per-profile basis.
 
 <!-- END:edge_cases -->
 

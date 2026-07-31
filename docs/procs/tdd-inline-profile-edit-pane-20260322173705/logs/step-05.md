@@ -1,3 +1,12 @@
+---
+title: Step 05
+doc_type: proc
+brief: Step 05
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 ## Step 5 — Update UI copy for inline edit mode
 ### Actions Taken
 - Added pure UI copy helpers for the form panel title, confirmation prompt, and normal-mode footer so add/edit copy is consistent and testable.

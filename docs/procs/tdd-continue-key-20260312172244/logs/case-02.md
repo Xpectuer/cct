@@ -1,3 +1,12 @@
+---
+title: Case 02
+doc_type: proc
+brief: Case 02
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 ## Case 2 — build_args_continue_only
 
 ### Actions Taken

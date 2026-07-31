@@ -1,3 +1,12 @@
+---
+title: Update Docs After New Feature
+doc_type: rule
+brief: After implementing a new feature (new hotkey, new CLI flag, new config field, new toggle, new backend behavior), update
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 # Update Docs After New Feature
 
 ## Rule

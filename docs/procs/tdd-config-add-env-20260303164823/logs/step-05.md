@@ -1,3 +1,12 @@
+---
+title: "Step 5: UI Form Rendering — Confirmation Summary"
+doc_type: proc
+brief: Update build_form_lines confirmation summary to show all 5 fields with masked API key.
+confidence: speculative
+created: 2026-06-30
+updated: 2026-06-30
+revision: 1
+---
 # Step 5: UI Form Rendering — Confirmation Summary
 
 ## Case
