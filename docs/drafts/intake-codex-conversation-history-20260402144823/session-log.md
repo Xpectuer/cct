@@ -1,7 +1,7 @@
 ---
 title: "Intake Session Log"
 doc_type: proc
-status: ready
+status: activated
 brief: "Q&A transcript for codex conversation history shared across profiles"
 confidence: verified
 created: 2026-04-02

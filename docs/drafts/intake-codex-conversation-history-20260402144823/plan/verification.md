@@ -7,7 +7,7 @@ yields_from:
   - spec.md
 created: 2026-08-01
 updated: 2026-08-01
-revision: 1
+revision: 2
 ---
 
 # Verification
@@ -25,7 +25,7 @@ revision: 1
 | 7 | `rg "write_codex_auth" src/` + `cargo build && cargo test` | 无残留符号；编译 + 全绿 |
 | 8 | `cargo test apply_overlay_winner` | 3 个新测试通过；回写保留其他字段 |
 | 9 | `cargo test diff_cct_owned_keys` + `cargo test apply_on_disk_winner` | 4 个 diff 测试 + 回写重载闭环测试通过 |
-| 10 | `cargo build && cargo test` | 编译通过；app 现有测试全绿 |
+| 10 | `cargo test enter_conflict` + `cargo build && cargo test` | 模式转换测试（`enter_conflict_holds_profile_idx_and_diffs`）通过；app 现有测试全绿 |
 | 11 | `cargo test` | ui 测试含 footer `[p]`/`[d]` 断言 |
 | 12 | `cargo build && cargo test` | 全绿；`rg "launch_and_exit\(" src/main.rs` = 3 处调用（另含 1 处 `fn launch_and_exit` 定义） |
 | 13 | `cargo test` | 3 个契约测试通过（含回写闭环） |
