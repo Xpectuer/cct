@@ -4,9 +4,11 @@ doc_type: review
 brief: "Design review checklist for shared Codex history with isolated profile config"
 confidence: verified
 created: 2026-04-02
-updated: 2026-04-02
-revision: 1
+updated: 2026-08-01
+revision: 2
 ---
+
+> **⚠️ SUPERSEDED (2026-08-01)**: 本文是 revision 1 设计（per-profile `CODEX_HOME` + 符号链接共享 artifact）的评审记录，该设计已被 revision 2（共享 `CODEX_HOME` + 官方 `--profile` 叠加层）否决。当前权威评审见 [plan/review.md](plan/review.md)，权威计划见 [plan/index.md](plan/index.md)。以下内容仅作历史参考。
 
 # Review: Codex conversation history shared across profiles
 

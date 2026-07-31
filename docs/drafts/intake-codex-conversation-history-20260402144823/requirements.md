@@ -1,11 +1,11 @@
 ---
 title: "Requirements: Codex conversation history shared across profiles"
 doc_type: proc
-brief: "Share Codex conversation history across profiles while keeping profile-specific launch config isolated"
+brief: "Share Codex conversation history across profiles via shared CODEX_HOME + official --profile mechanism, with two-way binding to profiles.toml"
 confidence: verified
 created: 2026-04-02
-updated: 2026-04-02
-revision: 1
+updated: 2026-08-01
+revision: 2
 source_skill: intake
 ---
 
@@ -17,42 +17,45 @@ source_skill: intake
 
 ## 2. Desired Outcome
 
-All Codex profiles should share one conversation-history store while still keeping each profile's generated runtime configuration isolated. Launching profile A and then profile B should expose the same visible Codex history, without merging all runtime state into one unbounded shared directory. The resulting design must keep the current UI and profile schema unchanged.
+All Codex profiles share one conversation-history store while still keeping each profile's launch configuration isolated. Launching profile A and then profile B should expose the same visible Codex history. The shared store is the single `CODEX_HOME`; per-profile launch config moves to Codex's official `--profile` overlay layer; `profiles.toml` and the on-disk Codex config stay two-way bound (divergence is surfaced to the user, never silently resolved). Legacy per-profile homes migrate automatically.
 
 ## 3. Constraints
-- **Tech stack**: Rust, primarily `src/launch.rs`, with documentation updates in `docs/modules/` and `docs/references/`
+- **Tech stack**: Rust, primarily `src/launch.rs` and `src/app.rs` (conflict dialog), with documentation updates in `docs/modules/` and `docs/references/`
 - **Hard boundaries**:
-  - Do not change TUI behavior, keybindings, or profile schema
-  - Keep pure path/layout calculation separate from side-effectful filesystem preparation
-  - Keep profile-owned `config.toml` and `auth.json` isolated per profile runtime
-  - Define the shared-history boundary through an explicit artifact list, not by sharing the whole `CODEX_HOME`
-  - Fail fast on unsafe filesystem conflicts instead of silently overwriting or silently degrading to isolated history
+  - All Codex profiles share exactly one `CODEX_HOME`; no per-profile home directories for new state
+  - Per-profile launch config lives in `$CODEX_HOME/<name>.config.toml`, selected via `--profile <name>` (Codex 0.134.0+ official mechanism; legacy `[profiles.*]` tables are unsupported)
+  - API keys flow through `model_providers.custom.env_key` from profile env; cct stops writing `auth.json`
+  - Two-way binding: cct-owned overlay keys are refreshed from `profiles.toml` each launch; when a hand-edited on-disk value diverges from `profiles.toml`, the TUI shows a conflict dialog and the chosen side is written back to the other — no silent overwrite in either direction
+  - Migration of legacy per-profile homes is automatic and runs at most once per profile; existing shared-home targets are never overwritten
+  - TUI changes are limited to the conflict dialog (`AppMode::ConflictConfirm`, two footer-hinted keys); profile schema unchanged
+  - Keep pure path/diff/migration-plan helpers separate from effectful filesystem preparation
 
 ## 4. Scope
 ### In Scope
-- Introduce a pure Codex layout helper that resolves profile runtime, shared history, and active home paths
-- Add filesystem preparation logic that creates the composed Codex home for launch
-- Share the explicit history artifacts across Codex profiles
-- Keep generated profile config/auth isolated from shared history
-- Add tests for layout resolution, shared-history mapping, idempotency, and conflict failures
-- Update launch/backend documentation to match the new behavior
+- One shared `CODEX_HOME` for all Codex profiles
+- Per-profile overlay generation (`write_codex_profile_overlay`) with surgical `toml_edit` merge
+- `--profile <name>` appended to launch args; `write_codex_auth` removed
+- Conflict detection (`diff_cct_owned_keys`) and the TUI `ConflictConfirm` dialog with write-back to `profiles.toml`
+- Automatic one-time migration of legacy per-profile history artifacts into the shared home
+- Tests: layout, diff, migration-plan (pure); overlay/migration (tempdir); dialog dispatch; cross-module contracts
+- Documentation updates (launch.md, codex-backend-development-guide.md, codex-home-storage-layout.md, CLAUDE.md)
 
 ### Out of Scope
-- Any UI change or new profile field
-- Sharing the entire `CODEX_HOME`
-- Copy-based history sync between profile homes
-- Changes to Claude backend behavior
-- Broad runtime-state unification beyond the explicitly required history artifacts
+- Any change to the Claude backend
+- Changes to the profile schema in `profiles.toml`
+- Symlink/copy-based history sharing
+- Broad runtime-state unification beyond what sharing `CODEX_HOME` already provides (caches, logs, skills stay shared by construction)
+- Backporting the official profile mechanism to Codex versions < 0.134.0
 
 ## 5. Acceptance Criteria
-- [ ] Two Codex profiles can see the same conversation history after launch
-- [ ] Profile-specific config generation remains isolated per profile
-- [ ] Shared-history artifacts are defined explicitly in code and documentation
-- [ ] Launch fails fast when an expected shared-history path conflicts with an existing regular file or unexpected content
-- [ ] Automated tests cover layout resolution, shared mapping, idempotency, and failure behavior
+- [ ] Two Codex profiles see the same conversation history after launch
+- [ ] Each profile still launches with its own model/provider/base URL (via overlay + `--profile`)
+- [ ] Editing a cct-owned key in the on-disk overlay and launching shows a conflict dialog; choosing "on-disk wins" writes the value back to `profiles.toml`, and choosing "profiles.toml wins" regenerates the overlay
+- [ ] Legacy per-profile history artifacts migrate to the shared home once, without overwriting existing targets
+- [ ] `auth.json` is no longer written by cct; profiles with `OPENAI_API_KEY` authenticate via `env_key`
+- [ ] Automated tests cover layout resolution, overlay merge, conflict diff, dialog dispatch, migration, and cross-module write-back
 - [ ] Documentation no longer states that Codex history is isolated per profile
-- [ ] No UI or config-schema changes are required for the feature
 
 ---
-*Generated by intake skill on 2026-04-02*
+*Generated by intake skill on 2026-04-02; revised 2026-08-01 (design revision 2: shared CODEX_HOME + official `--profile`)*
 *Session log: ./session-log.md*
