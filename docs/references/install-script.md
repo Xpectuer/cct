@@ -139,3 +139,16 @@ bash install.sh
 | `GITLAB_URL` | (unset) | Self-hosted GitLab base URL |
 | `GITLAB_PROJECT` | (unset) | GitLab project path |
 | `GITLAB_TOKEN` | (unset) | GitLab personal access token |
+
+## Upgrading from pre-fix versions (deadlock) 迁移说明
+
+### 旧版死锁实例迁移（一次性）
+
+旧版本（0.5.0 之前修复版）proxy 可能遗留死锁进程与死 socket 文件：
+
+1. 若 `lsof -iTCP:19191` 显示 PID 仍存活 → `kill <PID>`（新版探测会将其视为健康并复用，
+   唯一修复路径是手动终止旧进程）。
+2. 遗留 socket 文件（`~/.config/cc-tui/proxy.sock`，Linux；`~/Library/Application
+   Support/cc-tui/proxy.sock`，macOS）→ 可手动删除兜底；新版本启动时探测失败会自动清理，
+   删除顺序无关均安全。
+3. 新版本不再产生死锁进程，此迁移一次性。

@@ -20,7 +20,10 @@ export CCT_PROXY_PORT="${PROXY_PORT:-19191}"
 export OPENAI_API_KEY="$TEST_API_KEY"
 
 cleanup_smoke() {
-  [ -n "$STUB_PID" ] && kill "$STUB_PID" 2>/dev/null
+  # 停掉 cct run 内部 ensure_proxy_running 拉起的 proxy daemon（经控制 socket），
+  # 否则遗留 daemon 占住 TCP 端口 → B002/B009 首跑级联失败。
+  "$CCT_BIN" proxy stop >/dev/null 2>&1 || true
+  [ -n "${STUB_PID:-}" ] && kill "$STUB_PID" 2>/dev/null || true
   rm -rf "$SMOKE_DIR"
 }
 trap cleanup_smoke EXIT
@@ -36,34 +39,39 @@ grep -q "LISTENING" "$STUB_LOG" || {
 }
 
 mkdir -p "$CODEX_HOME"
+# api_key 必须写在 [profiles.env] OPENAI_API_KEY（exec_codex_proxy 只从这里读）;
+# 顶层 api_key 字段不存在于 Profile schema, 会被 serde 静默忽略 → Bearer 转发断言失败。
 cat > "$CCT_CONFIG" << EOF
 [[profiles]]
 name = "smoke-a"
 backend = "codex"
 base_url = "http://127.0.0.1:$STUB_PORT/v1"
-api_key = "$TEST_API_KEY"
 model = "gpt-4.1"
 extra_args = ["exec", "-o", "$SMOKE_DIR/out-a.txt", "--dangerously-bypass-approvals-and-sandbox", "hello"]
+[profiles.env]
+OPENAI_API_KEY = "$TEST_API_KEY"
 
 [[profiles]]
 name = "smoke-b"
 backend = "codex"
 base_url = "http://127.0.0.1:$STUB_PORT/v1"
-api_key = "$TEST_API_KEY"
 model = "gpt-4.1"
-extra_args = ["exec", "resume", "--last", "-o", "$SMOKE_DIR/out-b.txt"]
+extra_args = ["exec", "resume", "--last", "-o", "$SMOKE_DIR/out-b.txt", "hello"]
+[profiles.env]
+OPENAI_API_KEY = "$TEST_API_KEY"
 
 [[profiles]]
 name = "smoke-c"
 backend = "codex"
 base_url = "http://127.0.0.1:$STUB_PORT/v1"
-api_key = "$TEST_API_KEY"
 model = "gpt-4.1"
-extra_args = ["exec", "resume", "--last", "--all", "-o", "$SMOKE_DIR/out-c.txt"]
+extra_args = ["exec", "resume", "--last", "--all", "-o", "$SMOKE_DIR/out-c.txt", "hello"]
+[profiles.env]
+OPENAI_API_KEY = "$TEST_API_KEY"
 
 [[profiles]]
 name = "smoke-sub"
 backend = "codex"
 auth_type = "subscription"
-extra_args = ["exec", "resume", "--last", "-o", "$SMOKE_DIR/out-sub.txt"]
+extra_args = ["exec", "resume", "--last", "-o", "$SMOKE_DIR/out-sub.txt", "hello"]
 EOF

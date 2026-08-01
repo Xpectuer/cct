@@ -234,7 +234,9 @@ fn run_proxy_start() -> Result<()> {
 
 fn stop_proxy() -> Result<()> {
     let socket_path = proxy::proxy_socket_path();
-    if !proxy::check_proxy_running(&socket_path) {
+    // 无 socket 文件 = 无实例 → 快速 exit 0；socket 存在但无响应 →
+    // shutdown_proxy 2s 超时传播错误（死锁进程持端口时不得误报 not running）。
+    if !socket_path.exists() {
         println!("Proxy is not running.");
         return Ok(());
     }
@@ -836,5 +838,54 @@ description = "Second profile"
         assert!(readme.contains("| `e` | Edit the selected profile inline |"));
         assert!(!readme.contains(concat!("Edit ", "config in `$EDITOR`")));
         assert!(!readme.contains("Hot-reload"));
+    }
+
+    // ── stop_proxy 区分"无 socket / 无响应"（Step 9：约束 #1/#10）──────
+
+    /// 无 socket 文件 = 无实例 → 快速 Ok（"Proxy is not running."），exit 0 语义。
+    #[test]
+    #[serial]
+    fn stop_proxy_ok_when_socket_absent() {
+        let path = std::env::temp_dir().join("cct-proxy-stop-absent.sock");
+        let _ = std::fs::remove_file(&path);
+        std::env::set_var("CCT_PROXY_SOCKET", &path);
+        let result = stop_proxy();
+        std::env::remove_var("CCT_PROXY_SOCKET");
+        assert!(
+            result.is_ok(),
+            "absent socket must be a fast Ok, got: {result:?}"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// socket 存在但无响应（hold 住不回包）→ stop_proxy 必须传播 shutdown 错误
+    /// （死锁进程持端口时不得误报 "not running"）。
+    #[test]
+    #[serial]
+    fn stop_proxy_errs_on_unresponsive_socket() {
+        let path = std::env::temp_dir().join("cct-proxy-stop-silent.sock");
+        let _ = std::fs::remove_file(&path);
+        let listener =
+            std::os::unix::net::UnixListener::bind(&path).expect("bind test control socket");
+        let handle = std::thread::spawn(move || {
+            let (_stream, _peer) = listener.accept().expect("accept stop connection");
+            // Hold the connection open without responding (hung proxy daemon).
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        });
+        std::env::set_var("CCT_PROXY_SOCKET", &path);
+        let started = std::time::Instant::now();
+        let result = stop_proxy();
+        std::env::remove_var("CCT_PROXY_SOCKET");
+        assert!(
+            result.is_err(),
+            "stop on unresponsive socket must propagate error, got: {result:?}"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "stop must return in bounded time, took {:?}",
+            started.elapsed()
+        );
+        handle.join().expect("silent listener thread panicked");
+        let _ = std::fs::remove_file(&path);
     }
 }

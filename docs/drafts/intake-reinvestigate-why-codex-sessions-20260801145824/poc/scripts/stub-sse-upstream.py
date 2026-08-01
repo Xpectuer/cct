@@ -6,8 +6,10 @@
 行为:
 - 启动成功时写一行 LISTENING 到 logfile（供 setup 检测就绪）
 - 每个请求: 记录 method/path/Authorization/body 前 500 字符到 logfile
-- 返回 SSE 事件流: response.created -> response.output_text.delta -> response.completed
-  (delta 固定为 POC_STUB_LAST_MESSAGE, 供 -o 文件末尾文本断言)
+- 返回 item-based SSE 事件流: response.created -> response.output_item.added
+  -> response.output_text.delta -> response.output_item.done -> response.completed
+  (delta 固定为 POC_STUB_LAST_MESSAGE, 供 -o 文件末尾文本断言;
+  codex 0.146 缺 output_item.added 会报 OutputTextDelta without active item)
 
 契约细节若与 codex 客户端不匹配, PoC 结果将直接揭示 — 这正是验证目标。
 """
@@ -32,7 +34,21 @@ COMPLETED = {
                     "content": [{"type": "output_text", "text": DELTA, "annotations": []}]}],
     },
 }
+# codex 0.146 需要 item-based 事件序列: output_item.added 建立 active item 后,
+# output_text.delta 才会被接受（否则 "OutputTextDelta without active item",
+# -o 输出为空）。形状对齐 codex 自身测试 fixture（codex-rs/codex-api sse/responses.rs）。
+OUTPUT_ITEM_ADDED = {
+    "type": "response.output_item.added",
+    "output_index": 0,
+    "item": {"type": "message", "role": "assistant", "status": "in_progress", "content": []},
+}
 DELTA_EV = {"type": "response.output_text.delta", "delta": DELTA, "sequence_number": 1}
+OUTPUT_ITEM_DONE = {
+    "type": "response.output_item.done",
+    "output_index": 0,
+    "item": {"type": "message", "role": "assistant", "status": "completed",
+            "content": [{"type": "output_text", "text": DELTA, "annotations": []}]},
+}
 
 
 def sse_frame(evt, obj):
@@ -47,7 +63,7 @@ class Handler(BaseHTTPRequestHandler):
     def _log(self):
         with open(LOG, "a") as f:
             auth = self.headers.get("Authorization", "")
-            f.write(f"{self.command} {self.path} auth={auth}\n")
+            f.write(f"{self.command} {self.path} Authorization: {auth}\n")
             n = int(self.headers.get("content-length") or 0)
             if n:
                 f.write("body=" + self.rfile.read(n).decode(errors="replace")[:500] + "\n")
@@ -57,7 +73,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
         for evt, obj in (("response.created", CREATED),
+                         ("response.output_item.added", OUTPUT_ITEM_ADDED),
                          ("response.output_text.delta", DELTA_EV),
+                         ("response.output_item.done", OUTPUT_ITEM_DONE),
                          ("response.completed", COMPLETED)):
             self.wfile.write(sse_frame(evt, obj))
             self.wfile.flush()

@@ -15,7 +15,7 @@ echo "[PoC B009] 双启动防护: 报错退出, 不删活 proxy 的 socket"
 TMP=$(mktemp -d)
 SOCK="${CCT_PROXY_SOCKET:-$TMP/proxy.sock}"
 export CCT_PROXY_SOCKET="$SOCK" CCT_PROXY_PORT="${PROXY_PORT:-19191}"
-cleanup() { kill "${PROXY_PID:-}" 2>/dev/null; rm -f "$SOCK"; rm -rf "$TMP"; }
+cleanup() { [ -n "${PROXY_PID:-}" ] && kill "$PROXY_PID" 2>/dev/null || true; rm -f "$SOCK"; rm -rf "$TMP"; }
 trap cleanup EXIT
 
 probe() { printf '{"cmd":"status"}\n' | nc -U -w 2 "$SOCK" >/dev/null 2>&1; }

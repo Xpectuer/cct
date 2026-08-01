@@ -337,6 +337,8 @@ TCP bind 段：
 ```
 **Verify**: `cargo build`；G2 Step 11 占端口/双启动契约测试；PoC B003/B009 脚本
 
+（执行修订：bind 顺序为 TCP 先行——双启动竞态由 TCP 仲裁收敛（findings/double_start_race_one_wins-analysis.md）；控制段 delete-on-conflict + EEXIST 重探测耗尽保留作僵尸/抢绑防御。）
+
 ## Step 7 — shutdown 命令退出前清理 socket 文件
 
 **File**: `src/proxy.rs`

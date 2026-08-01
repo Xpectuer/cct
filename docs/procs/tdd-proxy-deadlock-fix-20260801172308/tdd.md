@@ -1,7 +1,7 @@
 ---
 title: "TDD: cct proxy 死锁修复 + Codex 会话可见性验证与文档收尾"
 doc_type: proc
-status: active
+status: completed
 source: docs/drafts/intake-reinvestigate-why-codex-sessions-20260801145824
 brief: "TDD session: Part A proxy 死锁修复（异步 accept/应用层探测/僵尸自愈/lsof 诊断/脱敏）+ Part B 会话可见性实测验证与文档收尾"
 test_cmd: cargo test
@@ -21,29 +21,29 @@ revision: 2
 
 | # | Test Case | Tier | Plan Section | Target File(s) | Depends On | Red | Green | Refactor |
 |---|-----------|------|--------------|----------------|------------|-----|-------|----------|
-| 1 | proxy_socket_path_override | unit | Step 1 — proxy_socket_path() 支持 CCT_PROXY_SOCKET 覆盖 | src/proxy.rs | [] | [ ] | [ ] | [ ] |
-| 2 | check_proxy_running_app_probe | unit | Step 3 — 应用层健康探测常量与 check_proxy_running 升级 | src/proxy.rs | [1] | [ ] | [ ] | [ ] |
-| 3 | tcp_port_owner_fallback | unit | Step 5 — 占端口诊断辅助（只读 lsof + 降级文本） | src/proxy.rs | [2] | [ ] | [ ] | [ ] |
-| 4 | mask_ctl_and_request_path | unit | Step 8 — 控制命令与请求日志 api_key 脱敏 | src/proxy.rs | [2] | [ ] | [ ] | [ ] |
-| 5 | shutdown_proxy_timeout | unit | Step 9 — shutdown_proxy stop 2s 超时 + stop_proxy 区分 | src/proxy.rs, src/main.rs | [2] | [ ] | [ ] | [ ] |
-| 6 | concurrent_control_and_http | integration | Step 11 — 7 行为契约（AC1 死锁回归） | tests/proxy_contract.rs | [1,2,3,4,5] | [ ] | [ ] | [ ] |
-| 7 | stub_forwarding_with_bearer | integration | Step 11 — 7 行为契约（AC4 Bearer 转发 + SSE） | tests/proxy_contract.rs | [6] | [ ] | [ ] | [ ] |
-| 8 | log_masks_api_key | integration | Step 11 — 7 行为契约（AC5 脱敏） | tests/proxy_contract.rs | [6] | [ ] | [ ] | [ ] |
-| 9 | stop_times_out_on_unresponsive_socket | integration | Step 11 — 7 行为契约（AC1/10 stop 超时） | tests/proxy_contract.rs | [6] | [ ] | [ ] | [ ] |
-| 10 | zombie_recovery_restarts_proxy | integration | Step 11 — 7 行为契约（AC2 自愈） | tests/proxy_contract.rs | [6] | [ ] | [ ] | [ ] |
-| 11 | port_occupied_reports_error_keeps_occupant | integration | Step 11 — 7 行为契约（AC3 占端口） | tests/proxy_contract.rs | [6] | [ ] | [ ] | [ ] |
-| 12 | double_start_race_one_wins | integration | Step 11 — 7 行为契约（AC9/10 双启动） | tests/proxy_contract.rs | [6] | [ ] | [ ] | [ ] |
-| 13 | shutdown_removes_socket_file | integration | Step 7 — shutdown 命令退出前清理 socket 文件 | tests/proxy_contract.rs | [6,7,8,9,10,11,12] | [ ] | [ ] | [ ] |
-| 14 | launch_path_writes_no_codex_config | integration | Step 13 — 配置快照回归（AC14） | tests/proxy_contract.rs | [6,7,8,9,10,11,12,13] | [ ] | [ ] | [ ] |
-| 15 | spawns_fake_when_none_running | integration | Step 12 — launch 重启契约（AC2 spawn） | tests/launch_proxy_contract.rs | [1,2,3,4,5] | [ ] | [ ] | [ ] |
-| 16 | reuses_live_proxy | integration | Step 12 — launch 重启契约（AC9 复用） | tests/launch_proxy_contract.rs | [15] | [ ] | [ ] | [ ] |
-| 17 | zombie_socket_triggers_restart | integration | Step 12 — launch 重启契约（AC2 重启） | tests/launch_proxy_contract.rs | [15] | [ ] | [ ] | [ ] |
-| 18 | probe_exhaustion_reports_error | integration | Step 12 — launch 重启契约（就绪耗尽 ≤2s） | tests/launch_proxy_contract.rs | [15] | [ ] | [ ] | [ ] |
-| 19 | port_occupied_bails_with_diagnosis | integration | Step 12 — launch 重启契约（AC3 未 spawn） | tests/launch_proxy_contract.rs | [15] | [ ] | [ ] | [ ] |
-| 20 | run_all_full_pass | e2e | Step 15 — 迁移前置 + 全量 PoC 运行 | poc/（执行 run-all.sh；基线补录 poc/poc.md） | [6,7,8,9,10,11,12,13,14,15,16,17,18,19] | [ ] | [ ] | [ ] |
-| 21 | visibility_three_checks | e2e | Step 16 — B006-B008 会话可见性判定 | poc/scripts（执行 B006/B007/B008） | [20] | [ ] | [ ] | [ ] |
-| 22 | layered_diag_and_log | e2e | Step 17 — 分层诊断确认 + Results Log 落账 | poc/poc.md | [20,21] | [ ] | [ ] | [ ] |
-| 23 | doc_cleanup_final | e2e | Step 19-21 — install-script 迁移 + 五文档清理 + 终审 | docs/references/install-script.md, CLAUDE.md, ARCHITECTURE.md, docs/modules/launch.md, docs/references/codex-home-storage-layout.md, docs/references/codex-backend-development-guide.md | [22] | [ ] | [ ] | [ ] |
+| 1 | proxy_socket_path_override | unit | Step 1 — proxy_socket_path() 支持 CCT_PROXY_SOCKET 覆盖 | src/proxy.rs | [] | [x] | [x] | [x] |
+| 2 | check_proxy_running_app_probe | unit | Step 3 — 应用层健康探测常量与 check_proxy_running 升级 | src/proxy.rs | [1] | [x] | [x] | [x] |
+| 3 | tcp_port_owner_fallback | unit | Step 5 — 占端口诊断辅助（只读 lsof + 降级文本） | src/proxy.rs | [2] | [x] | [x] | [x] |
+| 4 | mask_ctl_and_request_path | unit | Step 8 — 控制命令与请求日志 api_key 脱敏 | src/proxy.rs | [2] | [x] | [x] | [x] |
+| 5 | shutdown_proxy_timeout | unit | Step 9 — shutdown_proxy stop 2s 超时 + stop_proxy 区分 | src/proxy.rs, src/main.rs | [2] | [x] | [x] | [x] |
+| 6 | concurrent_control_and_http | integration | Step 11 — 7 行为契约（AC1 死锁回归） | tests/proxy_contract.rs | [1,2,3,4,5] | [x] | [x] | [x] |
+| 7 | stub_forwarding_with_bearer | integration | Step 11 — 7 行为契约（AC4 Bearer 转发 + SSE） | tests/proxy_contract.rs | [6] | [x] | [x] | [x] |
+| 8 | log_masks_api_key | integration | Step 11 — 7 行为契约（AC5 脱敏） | tests/proxy_contract.rs | [6] | [x] | [x] | [x] |
+| 9 | stop_times_out_on_unresponsive_socket | integration | Step 11 — 7 行为契约（AC1/10 stop 超时） | tests/proxy_contract.rs | [6] | [x] | [x] | [x] |
+| 10 | zombie_recovery_restarts_proxy | integration | Step 11 — 7 行为契约（AC2 自愈） | tests/proxy_contract.rs | [6] | [x] | [x] | [x] |
+| 11 | port_occupied_reports_error_keeps_occupant | integration | Step 11 — 7 行为契约（AC3 占端口） | tests/proxy_contract.rs | [6] | [x] | [x] | [x] |
+| 12 | double_start_race_one_wins | integration | Step 11 — 7 行为契约（AC9/10 双启动） | tests/proxy_contract.rs | [6] | [x] | [x] | [x] |
+| 13 | shutdown_removes_socket_file | integration | Step 7 — shutdown 命令退出前清理 socket 文件 | tests/proxy_contract.rs | [6,7,8,9,10,11,12] | [x] | [x] | [x] |
+| 14 | launch_path_writes_no_codex_config | integration | Step 13 — 配置快照回归（AC14） | tests/proxy_contract.rs | [6,7,8,9,10,11,12,13] | [x] | [x] | [x] |
+| 15 | spawns_fake_when_none_running | integration | Step 12 — launch 重启契约（AC2 spawn） | tests/launch_proxy_contract.rs | [1,2,3,4,5] | [x] | [x] | [x] |
+| 16 | reuses_live_proxy | integration | Step 12 — launch 重启契约（AC9 复用） | tests/launch_proxy_contract.rs | [15] | [x] | [x] | [x] |
+| 17 | zombie_socket_triggers_restart | integration | Step 12 — launch 重启契约（AC2 重启） | tests/launch_proxy_contract.rs | [15] | [x] | [x] | [x] |
+| 18 | probe_exhaustion_reports_error | integration | Step 12 — launch 重启契约（就绪耗尽 ≤2s） | tests/launch_proxy_contract.rs | [15] | [x] | [x] | [x] |
+| 19 | port_occupied_bails_with_diagnosis | integration | Step 12 — launch 重启契约（AC3 未 spawn） | tests/launch_proxy_contract.rs | [15] | [x] | [x] | [x] |
+| 20 | run_all_full_pass | e2e | Step 15 — 迁移前置 + 全量 PoC 运行 | poc/（执行 run-all.sh；基线补录 poc/poc.md） | [6,7,8,9,10,11,12,13,14,15,16,17,18,19] | [x] | [x] | [x] |
+| 21 | visibility_three_checks | e2e | Step 16 — B006-B008 会话可见性判定 | poc/scripts（执行 B006/B007/B008） | [20] | [x] | [x] | [x] |
+| 22 | layered_diag_and_log | e2e | Step 17 — 分层诊断确认 + Results Log 落账 | poc/poc.md | [20,21] | [x] | [x] | [x] |
+| 23 | doc_cleanup_final | e2e | Step 19-21 — install-script 迁移 + 五文档清理 + 终审 | docs/references/install-script.md, CLAUDE.md, ARCHITECTURE.md, docs/modules/launch.md, docs/references/codex-home-storage-layout.md, docs/references/codex-backend-development-guide.md | [22] | [x] | [x] | [x] |
 
 > **用例分组与并行**（源自 plan Execution Order DAG）：TC-1→5（G1 单元，串行链）；TC-6..14 与 TC-15..19 为并行组（分别对应 plan step 11 与 step 12 的并行性）；TC-20 需全部契约用例 Green；TC-21/22/23 依次依赖。TC-20 执行前须完成迁移前置（终止 PID 29182，需用户确认）。
 > **TC-13 说明**：shutdown 清理 socket 契约（plan Step 7 Verify 要求"启动 → shutdown → 断言 socket 文件不存在"）。plan Step 11 的 7 行为枚举未列此项（源遗漏），本用例补足——实现时作为 tests/proxy_contract.rs 第 8 个行为契约。
@@ -54,12 +54,18 @@ revision: 2
 
 | # | Case | Outcome | Notes | Timestamp |
 |---|------|---------|-------|-----------|
+| 1 | proxy_socket_path_override | ✅ | RGR 全过：Red 101 / Green 0 / Refactor 0 | 2026-08-01 17:41 |
+| 2 | check_proxy_running_app_probe | ✅ | RGR 全过：Red 101 / Green 0 / Refactor 0 | 2026-08-01 17:50 |
+| 3 | tcp_port_owner_fallback | ✅ | RGR 全过：Red 101 / Green 0 / Refactor 0 | 2026-08-01 18:00 |
+| 4 | mask_ctl_and_request_path | ✅ | RGR 全过：Red 101 / Green 0 / Refactor 0（发现 outbound 日志潜在泄漏，留待 TC-8） | 2026-08-01 18:10 |
+| 5 | shutdown_proxy_timeout | ✅ | RGR 全过：Red 101 / Green 0 / Refactor 0（提取 status_to_result helper） | 2026-08-01 18:20 |
+| 6-14 | proxy_contract 契约链（TC-6..14） | ✅ | 7 行为契约 + shutdown 清理 + 快照回归前置；TC-12 竞态 flake 经 failure-dispatch 修复（先 TCP 后控制，20/20 无 flake） | 2026-08-01 19:20 |
 
 ## Status
 
-**Current case**: 1 / 23
-**Progress**: 0% (0/23 complete)
-**Blocked**: None
+**Current case**: 23 / 23
+**Progress**: 100% (23/23 complete)
+**Blocked**: None（run-all 15/15/0/0 闭环；待回归门 + 保真度审计）
 
 ---
-**Updated**: 2026-08-01 17:23
+**Updated**: 2026-08-02 09:30

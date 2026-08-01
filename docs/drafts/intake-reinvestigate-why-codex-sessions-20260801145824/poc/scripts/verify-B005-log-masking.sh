@@ -17,11 +17,12 @@ echo "[PoC B005] 日志打印不含 api_key 明文（脱敏）"
 TMP=$(mktemp -d)
 SOCK="${CCT_PROXY_SOCKET:-$TMP/proxy.sock}"
 LOG="$TMP/proxy.log"
-export CCT_PROXY_SOCKET="$SOCK" CCT_PROXY_PORT="${PROXY_PORT:-19191}" CCT_PROXY_LOG="$LOG"
-cleanup() { kill "${PROXY_PID:-}" 2>/dev/null; rm -f "$SOCK"; rm -rf "$TMP"; }
+export CCT_PROXY_SOCKET="$SOCK" CCT_PROXY_PORT="${PROXY_PORT:-19191}" CCT_PROXY_LOG=1
+cleanup() { [ -n "${PROXY_PID:-}" ] && kill "$PROXY_PID" 2>/dev/null || true; rm -f "$SOCK"; rm -rf "$TMP"; }
 trap cleanup EXIT
 
-"$CCT_BIN" proxy start >/dev/null 2>&1 & PROXY_PID=$!
+# CCT_PROXY_LOG 是开关: 置位后 log_proxy! 写 stderr — 捕获到 $LOG 供脱敏断言
+"$CCT_BIN" proxy start >"$LOG" 2>&1 & PROXY_PID=$!
 for _ in $(seq 1 50); do
   [ -S "$SOCK" ] && break
   sleep 0.1
