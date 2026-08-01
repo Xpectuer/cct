@@ -5,10 +5,26 @@ brief: "Design spec for sharing Codex conversation history via a shared CODEX_HO
 confidence: verified
 created: 2026-04-02
 updated: 2026-08-01
-revision: 2
+revision: 3
 ---
 
 # Spec: Codex conversation history shared across profiles
+
+> **⚖️ RE-EVAL (2026-08-01, revision 3)** — 本 spec 的 Chosen Approach（共享 `CODEX_HOME` + 官方 `--profile` 叠加层 + 双向绑定）基于 2026-07-13 之前的代码撰写，其前提在现行代码中已不存在。重新评估后判定 **draft 关闭，不进入实现**（详见 [review.md](review.md) revision 3 与 [requirements.md](requirements.md) revision 3）：
+>
+> **现行架构已覆盖设计目标**（master @ `514c646`）：
+> - 共享 history：所有 profile 共用默认 `~/.codex`（`afc1d11`）——即本 spec 想要的"共享 by construction"，且无需管理 `CODEX_HOME`；
+> - per-profile 启动配置：`--config model_provider=custom` 等 CLI flags 每次启动从 `profiles.toml` 生成（`build_codex_proxy_config_args`）——等效于 overlay，但无 on-disk 文件、无同步问题，`profiles.toml` 保持唯一事实源；
+> - API key：`profile.env.OPENAI_API_KEY` → proxy `switch_profile`（`9a09b39`），与 spec 的 `env_key` 思路一致；`auth.json` 已于 `107cecf` 删除（OQ-1 实测确认 codex 用 `env_key` 鉴权时不再生成 `auth.json`）。
+>
+> **本 spec 方案为何不再采纳**：
+> - `--profile` overlay 需要 cct 重新写 Codex 配置文件 → 重新引入 `9a09b39` 刚修复的"覆盖用户 config.toml"问题与 on-disk 同步复杂度；
+> - 双向绑定冲突对话框的载体（on-disk overlay 值）不存在，重新发明该载体只为支撑一个已消失的问题；
+> - 遗留迁移无真实数据（`~/.config/cc-tui/codex-homes/` 不存在）。
+>
+> **唯一剩余缺口**：AC7 文档陈旧叙述（`launch.md` / `codex-home-storage-layout.md` / `codex-backend-development-guide.md` / `CLAUDE.md` 仍描述 per-profile `CODEX_HOME` 与 `generate_codex_config`）。该清理不属于本 draft 的设计范畴，应作为独立文档收尾工作。
+>
+> 下文为历史设计文档（revision 2），仅作参考。
 
 ## Chosen Approach
 

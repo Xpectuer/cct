@@ -5,11 +5,27 @@ brief: "Share Codex conversation history across profiles via shared CODEX_HOME +
 confidence: verified
 created: 2026-04-02
 updated: 2026-08-01
-revision: 2
+revision: 3
 source_skill: intake
 ---
 
 # Requirements: Codex conversation history shared across profiles
+
+> **⚖️ RE-EVAL (2026-08-01, revision 3)** — 本文基于 2026-07-13 之前的代码布局撰写。仓库大幅演进后重新评估（详见 [review.md](review.md) revision 3）：
+>
+> **问题已被现行代码解决**：所有 Codex profile 共享默认 `~/.codex`（`afc1d11`，07-13 重构，配置经 `--config` CLI flags 传入），conversation history 不再按 profile 隔离；cct 不再写 `auth.json`（`107cecf`）；API key 经 profile env → proxy 注入（`9a09b39`）。
+>
+> **剩余增量逐项评估**：
+>
+> | 增量 | 现状 | 评估 | 决定 |
+> |------|------|------|------|
+> | 遗留 `codex-homes/<name>` 历史迁移 | 07-13 前 per-profile CODEX_HOME 布局 | 本机无任何遗留目录（`~/.config/cc-tui/codex-homes/` 不存在），无用户数据可迁移 | **不做** |
+> | 双向绑定冲突对话框 | cct 已完全不写 Codex 配置文件，配置走 `--config` flags | "on-disk 值与 profiles.toml 分歧"的前提载体不存在；`profiles.toml` 是唯一事实源，手改走 `e` 热重载 | **不做** |
+> | 官方 `--profile` 叠加层 | 当前 `--config` flags 实现同目的 | 每次启动从 `profiles.toml` 生成，无 on-disk 文件需管理；引入 overlay 反而会重新引入 `9a09b39` 修复的"覆盖用户 config"问题 | **不做** |
+>
+> **验收标准逐条状态**（下文 §5）：AC1（共享 history）、AC2（per-profile 启动配置）、AC5（不再写 auth.json）**已达成**；AC3（冲突对话框）、AC4（遗留迁移）、AC6（对应测试）**前提消失，不适用**；AC7（文档不再声称 history 按 profile 隔离）**未达成**——`docs/modules/launch.md`、`docs/references/codex-home-storage-layout.md`、`docs/references/codex-backend-development-guide.md`、`CLAUDE.md` 仍描述已删除的 per-profile `CODEX_HOME` / `generate_codex_config` 行为。
+>
+> **结论**：代码增量全部判定不做（KISS），本 draft **关闭**；唯一剩余工作为上述文档陈旧叙述清理（待确认执行）。下文为历史设计文档，仅作参考。
 
 ## 1. Problem Statement
 
