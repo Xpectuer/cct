@@ -1,0 +1,36 @@
+{
+  "sessions": {
+    "019fbc0d-512b-7a12-89de-52430d3816f6": {
+      "started": "2026-08-01T06:40:24Z",
+      "rules": {
+        "assert-contracts-not-incidental-platform-strings": "2026-08-01T06:40:24Z",
+        "cross-module-features-need-contract-tests": "2026-08-01T06:40:24Z",
+        "hotkey-ui-changes-must-be-discoverable": "2026-08-01T06:40:24Z",
+        "kiss": "2026-08-01T06:40:24Z",
+        "mask-secrets-on-every-display-path": "2026-08-01T06:40:24Z",
+        "preserve-user-edited-config-structure": "2026-08-01T06:40:24Z",
+        "pure-builders-thin-effectful-edges": "2026-08-01T06:40:24Z",
+        "single-source-of-truth-variant-mappings": "2026-08-01T06:40:24Z",
+        "test-boundaries-with-stubs-before-manual-verification": "2026-08-01T06:40:24Z",
+        "tui-cli-sync": "2026-08-01T06:40:24Z",
+        "update-docs-after-new-feature": "2026-08-01T06:40:24Z"
+      }
+    },
+    "019fbc29-f74d-7f91-87b0-c23c3fa56bb6": {
+      "started": "2026-08-01T07:11:36Z",
+      "rules": {
+        "assert-contracts-not-incidental-platform-strings": "2026-08-01T07:11:36Z",
+        "cross-module-features-need-contract-tests": "2026-08-01T07:11:36Z",
+        "hotkey-ui-changes-must-be-discoverable": "2026-08-01T07:11:36Z",
+        "kiss": "2026-08-01T07:11:36Z",
+        "mask-secrets-on-every-display-path": "2026-08-01T07:11:36Z",
+        "preserve-user-edited-config-structure": "2026-08-01T07:11:36Z",
+        "pure-builders-thin-effectful-edges": "2026-08-01T07:11:36Z",
+        "single-source-of-truth-variant-mappings": "2026-08-01T07:11:36Z",
+        "test-boundaries-with-stubs-before-manual-verification": "2026-08-01T07:11:36Z",
+        "tui-cli-sync": "2026-08-01T07:11:36Z",
+        "update-docs-after-new-feature": "2026-08-01T07:11:36Z"
+      }
+    }
+  }
+}

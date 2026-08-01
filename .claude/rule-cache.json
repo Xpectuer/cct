@@ -1,0 +1,57 @@
+[
+  {
+    "name": "assert-contracts-not-incidental-platform-strings",
+    "brief": "Verification should target the real platform contract rather than brittle wording or environment-specific text",
+    "when_to_use": null
+  },
+  {
+    "name": "cross-module-features-need-contract-tests",
+    "brief": "Features that span app, ui, config, main, and launch must be verified at the shared contract boundaries",
+    "when_to_use": null
+  },
+  {
+    "name": "hotkey-ui-changes-must-be-discoverable",
+    "brief": "Any new interactive key path must update the visible UI hints and ship with coverage for discoverability",
+    "when_to_use": null
+  },
+  {
+    "name": "kiss",
+    "brief": "Make Both Design Decision and Code Style As Simple/Stupid As Possible",
+    "when_to_use": null
+  },
+  {
+    "name": "mask-secrets-on-every-display-path",
+    "brief": "Any user-visible rendering of secret-like config values must apply the shared masking policy",
+    "when_to_use": null
+  },
+  {
+    "name": "preserve-user-edited-config-structure",
+    "brief": "Mutations to user config should preserve comments, formatting, and ordering whenever possible",
+    "when_to_use": null
+  },
+  {
+    "name": "pure-builders-thin-effectful-edges",
+    "brief": "Keep data shaping pure and isolate I/O, env mutation, terminal changes, and exec in narrow wrappers",
+    "when_to_use": null
+  },
+  {
+    "name": "single-source-of-truth-variant-mappings",
+    "brief": "Runtime-discriminated field/index mappings must be owned by one authoritative function",
+    "when_to_use": null
+  },
+  {
+    "name": "test-boundaries-with-stubs-before-manual-verification",
+    "brief": "External integrations should be made deterministic under test before relying on manual verification",
+    "when_to_use": null
+  },
+  {
+    "name": "tui-cli-sync",
+    "brief": "When adding or modifying a TUI feature (hotkey, toggle, setting, action on a profile), always review whether the CLI sur",
+    "when_to_use": null
+  },
+  {
+    "name": "update-docs-after-new-feature",
+    "brief": "After implementing a new feature (new hotkey, new CLI flag, new config field, new toggle, new backend behavior), update",
+    "when_to_use": null
+  }
+]
