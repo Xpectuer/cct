@@ -5,8 +5,10 @@ brief: "Self-review of plan/ against spec acceptance criteria"
 confidence: verified
 created: 2026-08-01
 updated: 2026-08-01
-revision: 3
+revision: 4
 ---
+
+> **⚠️ STALE (2026-08-01, revision 4)**: 本 plan 自审时基于的旧版代码（含 `generate_codex_config` / `write_codex_auth` / per-profile `CODEX_HOME`）已被 2026-07-13 重构与 2026-08-01 P0 修复替换。code-spec 的 old anchor 指向已删除的函数，plan 不可按原样执行。重审结果与剩余增量见 [../review.md](../review.md)（revision 3）。下述自审记录仅作历史参考。
 
 # Plan Review
 

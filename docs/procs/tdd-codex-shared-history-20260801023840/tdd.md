@@ -1,7 +1,7 @@
 ---
 title: "TDD: Codex shared history across profiles"
 doc_type: proc
-status: active
+status: abandoned
 source: "docs/drafts/intake-codex-conversation-history-20260402144823"
 brief: "TDD session for shared CODEX_HOME + --profile overlay + two-way binding + migration"
 test_cmd: "cargo test"
@@ -10,12 +10,15 @@ yields_from:
   - tdd-codex-shared-history-20260801023840_plan.md
 created: 2026-08-01
 updated: 2026-08-01
-revision: 1
+revision: 2
 ---
 
 # Codex Shared History - TDD Session
 
+> **⚠️ ABANDONED (2026-08-01)**: 本 TDD 会话所依赖的 plan/spec 基于旧版代码编写（含 `generate_codex_config` / `write_codex_auth` / per-profile `CODEX_HOME`）。代码库大幅更新（2026-07-13 共享 `~/.codex` 重构 + `--config` flags、2026-08-01 P0 修复）后，plan 的 old anchor 全部失效，且核心目标（共享 history）已在现行代码中实现。重审结论见 `docs/drafts/intake-codex-conversation-history-20260402144823/review.md`（revision 3）。测试 0/25，未进入 Green 阶段，无代码变更需要回滚。
+
 **Started**: 2026-08-01 02:39
+**Abandoned**: 2026-08-01
 **Plan**: `./tdd-codex-shared-history-20260801023840_plan.md`
 
 ## Test Cases
@@ -60,9 +63,10 @@ Depends On 列引用 **plan 步骤号**（继承自 Execution Order YAML 的 DAG
 
 ## Status
 
+**Status**: ABANDONED (2026-08-01) — 上游 plan 因代码演进失效，见文首说明
 **Current case**: 1 / 25
 **Progress**: 0% (0/25 complete)
 **Blocked**: None
 
 ---
-**Updated**: 2026-08-01 02:39
+**Updated**: 2026-08-01
