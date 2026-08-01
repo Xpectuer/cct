@@ -1,0 +1,1 @@
+../../../rules/hotkey-ui-changes-must-be-discoverable.md

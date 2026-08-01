@@ -1,0 +1,1 @@
+../../../rules/mask-secrets-on-every-display-path.md

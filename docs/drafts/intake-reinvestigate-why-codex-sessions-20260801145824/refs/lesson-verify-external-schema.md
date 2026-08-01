@@ -1,0 +1,1 @@
+../../../lessons/external-tool-config-schema-must-be-verified.md

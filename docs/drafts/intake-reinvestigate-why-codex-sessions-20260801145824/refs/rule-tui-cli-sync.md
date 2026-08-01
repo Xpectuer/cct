@@ -1,0 +1,1 @@
+../../../rules/tui-cli-sync.md

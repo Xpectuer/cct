@@ -1,0 +1,15 @@
+{
+  "title": "Architecture & Data Flow Review — cct proxy 修复 + 会话可见性",
+  "sections": [
+    {
+      "heading": "Data Flow — proxy 启动与请求链路（修复后）",
+      "type": "mermaid",
+      "content": "flowchart LR\n    U[用户选择 cct profile] --> L[cct launch 流程]\n    L -->|Unix socket 控制: 应用层探测→死则清理重启 / switch| P[Proxy 独立进程]\n    L -->|exec + --config model_provider=custom| C[codex 进程]\n    C -->|HTTP 127.0.0.1:19191/v1| P[Proxy HTTP server]\n    P -->|HTTP 转发 + Bearer API key| A[Upstream API]\n    C <-->|读写 sessions/ sqlite| S[(~/.codex 共享状态)]\n    C -->|codex resume: model_provider ∩ cwd 过滤| V[会话可见性视图]"
+    },
+    {
+      "heading": "Architecture — 组件与边界",
+      "type": "mermaid",
+      "content": "flowchart TD\n    TUI[cct TUI 主进程<br/>config/app/ui/launch] -->|spawn cct proxy start| P[Proxy 独立进程<br/>HTTP server + control socket + ActiveProfile 状态]\n    TUI -->|exec 进程替换| C[codex 进程<br/>--config model_provider=custom]\n    C -->|HTTP 127.0.0.1:19191/v1| P\n    P -->|HTTP 转发 + key| A[Upstream API]\n    C <-->|读写| S[(~/.codex<br/>sessions/ state_5.sqlite)]\n    S -->|按 model_provider+cwd 过滤| R[codex resume 视图]"
+    }
+  ]
+}

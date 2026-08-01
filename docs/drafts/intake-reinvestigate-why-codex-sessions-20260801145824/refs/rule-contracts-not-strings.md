@@ -1,0 +1,1 @@
+../../../rules/assert-contracts-not-incidental-platform-strings.md

@@ -1,0 +1,1 @@
+../../../rules/update-docs-after-new-feature.md

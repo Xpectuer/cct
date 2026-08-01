@@ -1,0 +1,1 @@
+../../../rules/test-boundaries-with-stubs-before-manual-verification.md

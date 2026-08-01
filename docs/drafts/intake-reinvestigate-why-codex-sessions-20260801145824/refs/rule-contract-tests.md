@@ -1,0 +1,1 @@
+../../../rules/cross-module-features-need-contract-tests.md

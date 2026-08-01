@@ -1,0 +1,1 @@
+../../../rules/preserve-user-edited-config-structure.md

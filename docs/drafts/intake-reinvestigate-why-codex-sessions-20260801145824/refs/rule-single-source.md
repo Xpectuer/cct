@@ -1,0 +1,1 @@
+../../../rules/single-source-of-truth-variant-mappings.md
