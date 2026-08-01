@@ -1,7 +1,7 @@
 ---
 title: "Intake Session Log"
 doc_type: proc
-status: ready
+status: activated
 brief: "Re-investigate why Codex sessions still appear isolated across cct profiles after shared CODEX_HOME"
 confidence: speculative
 created: 2026-08-01
