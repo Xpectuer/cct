@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>cct — Claude Code TUI Launcher · 内部分享</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg2: #161b22;
+    --fg: #e6edf3;
+    --dim: #8b949e;
+    --accent: #d97757;   /* claude orange */
+    --accent2: #58a6ff;
+    --green: #3fb950;
+    --border: #30363d;
+    --code-bg: #1c2129;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif;
+    overflow: hidden;
+  }
+  .slide {
+    position: absolute; inset: 0;
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    padding: 6vh 9vw;
+  }
+  .slide.active { display: flex; animation: fade .25s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  h1 { font-size: 3.2rem; letter-spacing: .02em; }
+  h2 { font-size: 2.1rem; margin-bottom: .6em; color: var(--fg); }
+  h2 .tag { color: var(--accent); margin-right: .4em; }
+  p, li { font-size: 1.15rem; line-height: 1.75; color: var(--fg); }
+  .dim { color: var(--dim); }
+  .accent { color: var(--accent); }
+  .blue { color: var(--accent2); }
+  .green { color: var(--green); }
+
+  ul { list-style: none; }
+  ul li { padding-left: 1.4em; position: relative; margin-bottom: .35em; }
+  ul li::before { content: "▸"; position: absolute; left: 0; color: var(--accent); }
+
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.1em 1.4em;
+    margin-bottom: .8em;
+  }
+  .card h3 { font-size: 1.15rem; color: var(--accent2); margin-bottom: .3em; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: .8em; }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1em 1.2em;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: .95rem;
+    line-height: 1.6;
+    overflow: auto;
+    max-height: 62vh;
+  }
+  code { font-family: "SF Mono", Menlo, Consolas, monospace; color: var(--accent2); }
+  pre code { color: var(--fg); }
+  .c-k { color: #ff7b72; }   /* toml key */
+  .c-s { color: #a5d6ff; }   /* string */
+  .c-c { color: var(--dim); } /* comment */
+  .c-cmd { color: var(--green); }
+
+  table { border-collapse: collapse; width: 100%; font-size: 1.02rem; }
+  th, td { text-align: left; padding: .5em .8em; border-bottom: 1px solid var(--border); }
+  th { color: var(--accent); font-weight: 600; }
+  td:first-child { font-family: "SF Mono", Menlo, monospace; color: var(--accent2); white-space: nowrap; }
+
+  .flow {
+    display: flex; align-items: center; gap: .6em; flex-wrap: wrap;
+    font-family: "SF Mono", Menlo, monospace; font-size: 1.05rem;
+  }
+  .flow .node { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: .45em .9em; }
+  .flow .arrow { color: var(--accent); }
+
+  .footer {
+    position: fixed; bottom: 2.2vh; left: 9vw; right: 9vw;
+    display: flex; justify-content: space-between; align-items: center;
+    color: var(--dim); font-size: .85rem;
+  }
+  .progress { position: fixed; top: 0; left: 0; height: 3px; background: var(--accent); transition: width .2s; z-index: 10; }
+  .title-slide { align-items: center; text-align: center; }
+  .title-slide h1 { font-size: 4rem; }
+  .title-slide .sub { font-size: 1.4rem; color: var(--dim); margin-top: .5em; }
+  .badge {
+    display: inline-block; background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 999px; padding: .25em 1em; font-size: .9rem; color: var(--dim); margin-top: 2em;
+  }
+  kbd {
+    background: var(--bg2); border: 1px solid var(--border); border-bottom-width: 2px;
+    border-radius: 6px; padding: .05em .45em; font-family: "SF Mono", Menlo, monospace; font-size: .92em;
+  }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 2em; align-items: start; }
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+
+<!-- 1. 封面 -->
+<section class="slide title-slide active">
+  <h1><span class="accent">cct</span></h1>
+  <div class="sub">Claude Code TUI Launcher —— 多配置一键启动的终端启动器</div>
+  <p style="margin-top:1.5em" class="dim">内部分享 · 背景 / 问题 / 用法 / 设计</p>
+  <div class="badge">Rust · ratatui · 单二进制 · MIT</div>
+</section>
+
+<!-- 2. 背景 -->
+<section class="slide">
+  <h2><span class="tag">01</span>背景</h2>
+  <ul>
+    <li>团队日常使用 <span class="accent">Claude Code</span> 作为 AI 编程助手</li>
+    <li>实际使用中往往存在<span class="blue">多套接入配置</span>：官方 API、第三方中转、不同模型、不同权限模式</li>
+    <li>Claude Code 的配置几乎完全靠<span class="blue">环境变量</span>驱动：
+      <code>ANTHROPIC_BASE_URL</code> / <code>ANTHROPIC_API_KEY</code> / <code>ANTHROPIC_MODEL</code> …</li>
+    <li>再叠加 CLI flags（<code>--model</code>、<code>--dangerously-skip-permissions</code>、<code>--continue</code>），组合非常多</li>
+  </ul>
+</section>
+
+<!-- 3. 问题 -->
+<section class="slide">
+  <h2><span class="tag">02</span>要解决的问题</h2>
+  <div class="card"><h3>切换配置成本高</h3><p>换一套接入 = 手工 export 一连串环境变量，容易串号、漏设、残留</p></div>
+  <div class="card"><h3>配置散落难管理</h3><p>API Key 散落在 shell rc、临时脚本、历史命令里，既难维护也容易泄露</p></div>
+  <div class="card"><h3>常用操作要记 flag</h3><p>跳过权限、恢复上次会话、换模型…… 每次都要翻文档拼参数</p></div>
+  <div class="card"><h3>团队没有统一入口</h3><p>新人上手靠口口相传，配置格式五花八门</p></div>
+</section>
+
+<!-- 4. cct 是什么 -->
+<section class="slide">
+  <h2><span class="tag">03</span>cct 是什么</h2>
+  <ul>
+    <li>一个 <span class="accent">Rust 单二进制</span> 终端 UI 启动器（ratatui + crossterm）</li>
+    <li>所有接入配置收进<span class="blue">一个 TOML 文件</span>，称为 profile（名称 + 模型 + env + flags）</li>
+    <li>打开 TUI → 上下键选 profile → 回车即启动 Claude Code</li>
+    <li>启动采用 Unix <code>exec()</code> <span class="blue">进程替换</span>：cct 完全退出，零包装、零开销，终端干净继承</li>
+    <li>同时提供 CLI 子命令：<code>cct add</code> / <code>cct run</code> / <code>cct env</code> / <code>cct edit</code></li>
+  </ul>
+  <div class="flow" style="margin-top:1.2em">
+    <span class="node">profiles.toml</span><span class="arrow">→</span>
+    <span class="node">cct TUI</span><span class="arrow">→</span>
+    <span class="node">exec</span><span class="arrow">→</span>
+    <span class="node">claude</span>
+  </div>
+  <p class="dim" style="margin-top:1em">注：本次分享聚焦 Claude Code 后端；<span class="blue">Codex / Kimi 后端开发中</span>，后续将支持按 Tab 切换多后端。</p>
+</section>
+
+<!-- 5. 用法：TUI -->
+<section class="slide">
+  <h2><span class="tag">04</span>用法 · TUI 主界面</h2>
+  <div class="two-col">
+    <div>
+      <p style="margin-bottom:.6em">运行 <code>cct</code> 进入界面：左侧 profile 列表 + 右侧详情面板（敏感值自动打码）：</p>
+      <pre><code><span class="c-cmd">$ cct</span>
+
+ ┌ Claude ────────────────────────────┐
+ │ ▸ third-party    kimi-k2           │
+ │   official       claude-sonnet-4   │
+ │   staging        (red: skip-perms) │
+ └────────────────────────────────────┘</code></pre>
+    </div>
+    <div>
+      <table>
+        <tr><th>按键</th><th>作用</th></tr>
+        <tr><td>j / k</td><td>上下选择 profile</td></tr>
+        <tr><td>Enter</td><td>启动选中 profile</td></tr>
+        <tr><td>c</td><td>带 <code>--continue</code> 启动，恢复上次会话</td></tr>
+        <tr><td>s</td><td>切换 skip_permissions（立即落盘，行变红）</td></tr>
+        <tr><td>t</td><td>切换 API_KEY / AUTH_TOKEN 认证方式</td></tr>
+        <tr><td>a / e / d</td><td>新增 / 编辑 / 复制 profile（内联表单）</td></tr>
+        <tr><td>q</td><td>退出</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- 6. 用法：CLI -->
+<section class="slide">
+  <h2><span class="tag">05</span>用法 · CLI 子命令</h2>
+  <pre><code><span class="c-cmd">$ cct add</span>                    <span class="c-c"># 交互式新增 profile（5 个提示，自动补全 env）</span>
+<span class="c-cmd">$ cct add --auth-type token</span> <span class="c-c"># 写入 ANTHROPIC_AUTH_TOKEN 而非 API_KEY</span>
+
+<span class="c-cmd">$ cct run third-party</span>       <span class="c-c"># 不进 TUI，按名字直接启动</span>
+<span class="c-cmd">$ cct run</span>                   <span class="c-c"># 数字选择器</span>
+
+<span class="c-cmd">$ cct env</span>                   <span class="c-c"># 非交互列出所有 profile</span>
+<span class="c-cmd">$ cct env my-profile -- claude --model haiku --verbose</span>
+                              <span class="c-c"># 注入该 profile 的环境，运行任意命令</span>
+<span class="c-cmd">$ cct edit</span>                  <span class="c-c"># 用 $EDITOR 直接打开 profiles.toml</span></code></pre>
+  <div class="card" style="margin-top:.8em">
+    <h3>cct env 背后的 Unix 哲学</h3>
+    <p><span class="accent">"做一件事，把它做好；程序要能与未知程序组合。"</span> —— <code>cct env</code> 只做"注入环境再执行"这一件事：它不认识 <code>claude</code> 的任何 flag，<code>claude</code> 也不认识 cct，二者仅靠环境变量和标准进程语义组合。因此任何现有或将来的 CLI（不限于 claude）都能零适配地被 cct 接管环境。</p>
+  </div>
+</section>
+
+<!-- 7. 配置文件 -->
+<section class="slide">
+  <h2><span class="tag">06</span>配置 · 一个 TOML 文件</h2>
+  <p style="margin-bottom:.6em">macOS：<code>~/Library/Application Support/cc-tui/profiles.toml</code> · Linux：<code>~/.config/cc-tui/profiles.toml</code></p>
+  <pre><code><span class="c-k">[[profiles]]</span>
+<span class="c-k">name</span> = <span class="c-s">"third-party"</span>
+<span class="c-k">description</span> = <span class="c-s">"Third-party Claude endpoint"</span>
+<span class="c-k">model</span> = <span class="c-s">"kimi-k2"</span>            <span class="c-c"># → --model</span>
+<span class="c-k">skip_permissions</span> = false     <span class="c-c"># → --dangerously-skip-permissions</span>
+<span class="c-k">auth_type</span> = <span class="c-s">"token"</span>          <span class="c-c"># 可选：用 ANTHROPIC_AUTH_TOKEN</span>
+<span class="c-k">extra_args</span> = [<span class="c-s">"--verbose"</span>]   <span class="c-c"># 原样追加</span>
+
+<span class="c-k">[profiles.env]</span>                <span class="c-c"># cct add 自动生成</span>
+<span class="c-k">ANTHROPIC_BASE_URL</span> = <span class="c-s">"https://api.example.com/v1"</span>
+<span class="c-k">ANTHROPIC_API_KEY</span> = <span class="c-s">"sk-..."</span>
+<span class="c-k">ANTHROPIC_MODEL</span> = <span class="c-s">"kimi-k2"</span>
+<span class="c-k">ANTHROPIC_DEFAULT_SONNET_MODEL</span> = <span class="c-s">"kimi-k2"</span>
+<span class="c-k">API_TIMEOUT_MS</span> = <span class="c-s">"600000"</span>
+<span class="c-k">CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC</span> = <span class="c-s">"1"</span></code></pre>
+  <p style="margin-top:.8em"><span class="green">✓ 结论：</span>所有接入配置收敛在这一个文件里 —— <span class="accent">拷走这一个文件，就迁移了全部配置</span>（换机器、共享给同事均适用）。</p>
+</section>
+
+<!-- 8. 设计：架构 -->
+<section class="slide">
+  <h2><span class="tag">07</span>设计 · 架构（5 个模块，无共享状态）</h2>
+  <table>
+    <tr><th>模块</th><th>职责</th></tr>
+    <tr><td>config</td><td>TOML 解析与校验；profile 追加/更新；toggle 用 <code>toml_edit</code> 外科手术式改写（保留注释）</td></tr>
+    <tr><td>app</td><td>光标状态、Normal/AddForm 模式、<code>FormState</code> 字段映射的单一事实源</td></tr>
+    <tr><td>ui</td><td>ratatui 渲染：列表 + 详情 35/65 分栏、表单、敏感值打码</td></tr>
+    <tr><td>launch</td><td>构建参数（--model / skip-perms / extra_args）、注入 env、<code>exec()</code> 进程替换</td></tr>
+    <tr><td>cli</td><td><code>cct add</code> 交互流、<code>cct run</code> 选择器、<code>cct env</code> 注入执行</td></tr>
+  </table>
+  <p class="dim" style="margin-top:.8em">数据流单向：<code>config → app → ui → launch</code>，无循环依赖，更接近 Unix filter 而非服务程序。</p>
+</section>
+
+<!-- 9. 设计：关键决策 -->
+<section class="slide">
+  <h2><span class="tag">08</span>设计 · 关键决策</h2>
+  <div class="grid2">
+    <div class="card"><h3>exec 而非 spawn</h3><p>进程替换启动 claude，无父进程驻留，终端行为与原生完全一致</p></div>
+    <div class="card"><h3>toml_edit 外科改写</h3><p>按 s / t 切换配置时只改一个键，注释和顺序原样保留</p></div>
+    <div class="card"><h3>秘密值全路径打码</h3><p>任何含 TOKEN / KEY / SECRET 的 env，在 UI、确认摘要中一律掩码</p></div>
+    <div class="card"><h3>防御性默认注入</h3><p>每个 Claude profile 启动前自动注入隐私默认值（关闭自动更新、遥测 opt-out 等）</p></div>
+    <div class="card"><h3>单一事实源</h3><p>表单字段 → profile 的映射集中在 <code>FormState::to_new_profile()</code>，杜绝字段错位</p></div>
+    <div class="card"><h3>配置热重载</h3><p>e 键打开编辑器，保存后不重启进程直接重新解析</p></div>
+  </div>
+</section>
+
+<!-- 10. 工程质量 -->
+<section class="slide">
+  <h2><span class="tag">09</span>工程质量</h2>
+  <ul>
+    <li><span class="blue">单元测试</span>：配置解析、参数构建、打码、toggle 逻辑（模块内 <code>#[cfg(test)]</code>）</li>
+    <li><span class="blue">集成测试（mock）</span>：用假 <code>claude</code> 脚本 stub 外部命令，断言捕获到的参数（<code>tests/integration.rs</code>）</li>
+    <li><span class="blue">集成测试（live）</span>：<code>CCT_LIVE_TESTS=1</code> 走真实 claude 二进制</li>
+    <li><span class="blue">BATS shell 测试</span>：<code>install.sh</code> 用 <code>export -f</code> stub 隔离测试</li>
+    <li><span class="blue">CI</span>：push/PR 跑 clippy + test，打 tag 自动发 release 二进制（Linux x86_64/aarch64、macOS arm64/x86_64）</li>
+  </ul>
+  <pre style="margin-top:.8em"><code><span class="c-cmd">cargo test</span>                    <span class="c-c"># 全部测试</span>
+<span class="c-cmd">cargo test --test integration</span> <span class="c-c"># E2E (mock)</span>
+<span class="c-cmd">bats tests/install.bats</span>       <span class="c-c"># 安装脚本测试</span></code></pre>
+</section>
+
+<!-- 11. 安装 -->
+<section class="slide">
+  <h2><span class="tag">10</span>安装与上手</h2>
+  <p style="margin-bottom:.5em">内网（self-hosted GitLab）一键安装到 <code>~/.local/bin/cct</code>：</p>
+  <pre><code><span class="c-cmd">curl -fsSL https://gitlab.clounix.com/zhengjy/cc_starter/-/raw/master/install.sh | \
+  GITLAB_URL=https://gitlab.clounix.com GITLAB_PROJECT=zhengjy/cc_starter bash</span></code></pre>
+  <p style="margin:.8em 0 .5em">或从源码安装（需 Rust 1.70+）：</p>
+  <pre><code><span class="c-cmd">cargo install --path .</span></code></pre>
+  <p style="margin:.8em 0 .5em">上手三步：</p>
+  <ul>
+    <li>运行一次 <code>cct</code>，自动生成默认配置文件</li>
+    <li><code>cct add</code>（或 TUI 里按 <kbd>a</kbd>）添加你的接入配置</li>
+    <li><code>cct</code> → 选择 → 回车，开始干活</li>
+  </ul>
+  <p class="dim" style="margin-top:.6em">若本机未装 claude，cct 启动时会提示并可直接执行官方安装脚本。</p>
+</section>
+
+<!-- 12. 总结 -->
+<section class="slide">
+  <h2><span class="tag">11</span>总结</h2>
+  <ul>
+    <li><span class="accent">一个文件</span>收敛所有 Claude Code 接入配置，告别手工 export</li>
+    <li><span class="accent">一次回车</span>完成启动：exec 进程替换，零开销、终端干净</li>
+    <li><span class="accent">一组按键</span>覆盖日常操作：切权限、切认证、续会话、增删改 profile</li>
+    <li><span class="accent">一套纪律</span>保证质量：秘密打码、防御性默认值、toml_edit 保注释、多层测试</li>
+  </ul>
+  <p style="margin-top:1.2em">欢迎试用 & 提 issue：<code>gitlab.clounix.com/zhengjy/cc_starter</code></p>
+  <p class="dim" style="margin-top:.5em">Q &amp; A</p>
+</section>
+
+<div class="footer">
+  <span>cct — Claude Code TUI Launcher · 内部分享</span>
+  <span id="pageinfo"></span>
+</div>
+
+<script>
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  let cur = 0;
+  const total = slides.length;
+  const progress = document.getElementById('progress');
+  const pageinfo = document.getElementById('pageinfo');
+  function show(i) {
+    cur = Math.max(0, Math.min(total - 1, i));
+    slides.forEach((s, idx) => s.classList.toggle('active', idx === cur));
+    progress.style.width = ((cur + 1) / total * 100) + '%';
+    pageinfo.textContent = (cur + 1) + ' / ' + total;
+    location.hash = cur + 1;
+  }
+  document.addEventListener('keydown', e => {
+    if (['ArrowRight','ArrowDown','PageDown',' '].includes(e.key)) { e.preventDefault(); show(cur + 1); }
+    else if (['ArrowLeft','ArrowUp','PageUp'].includes(e.key)) { e.preventDefault(); show(cur - 1); }
+    else if (e.key === 'Home') show(0);
+    else if (e.key === 'End') show(total - 1);
+  });
+  document.addEventListener('click', e => {
+    if (e.clientX > window.innerWidth / 2) show(cur + 1); else show(cur - 1);
+  });
+  const h = parseInt(location.hash.slice(1));
+  show(isNaN(h) ? 0 : h - 1);
+</script>
+</body>
+</html>
