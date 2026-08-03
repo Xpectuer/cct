@@ -142,6 +142,8 @@ Lessons:
 - [cct env can inject env vars into happy daemon](docs/lessons/happy-daemon-env-injection-via-cct.md) — use `cct env <profile> -- happy daemon start` to seed daemon sessions with profile env
 - [install.sh 404 network issue](docs/lessons/install-script-404-network-issue.md) — HTTP 404 from GitHub API can mean connectivity failure, not missing releases
 - [GitLab Runner SSH cloning on self-hosted](docs/lessons/gitlab-runner-ssh-cloning-self-hosted.md) — helper image uses apk not apt-get; volume-mounted .ssh has wrong ownership; tagged runners ignore untagged jobs
+- [Stale daemon undermines fix verification](docs/lessons/stale-daemon-undermines-fix-verification.md) — probe coverage must equal the fault surface; verify the running instance is the fixed binary
+- [Proxy base URL must not carry /v1](docs/lessons/proxy-base-url-no-version-prefix.md) — forwarding concatenates base_url + client path; OpenAI-compatible clients already send /v1 in the path
 
 References:
 - [install-script reference](docs/references/install-script.md) — curl|bash installer functions and test coverage
