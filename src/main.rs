@@ -66,10 +66,6 @@ fn main() -> Result<()> {
     // Ignore errors — failing to set onboarding is non-fatal
     let _ = launch::ensure_claude_onboarding();
 
-    if !launch::check_claude_installed() {
-        launch::prompt_install()?;
-    }
-
     let args = Cli::parse();
     match args.command {
         Some(Commands::Add { auth_type, backend }) => cli::run_add(auth_type, backend),
@@ -235,6 +231,12 @@ fn stop_proxy() -> Result<()> {
 }
 
 fn run_tui() -> Result<()> {
+    // Only the interactive TUI offers the install prompt; CLI subcommands
+    // (proxy daemon, add, edit, run, env) must never trigger a silent install.
+    if !launch::check_claude_installed() {
+        launch::prompt_install()?;
+    }
+
     let profiles = config::load_profiles()?;
 
     enable_raw_mode()?;

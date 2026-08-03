@@ -52,7 +52,8 @@ Each module has no circular dependency. `launch` dispatches to `exec_claude` or 
 src/main.rs (entry point)
   → config::ensure_default_config()   # create ~/.config/cc-tui/profiles.toml if absent
   → config::ensure_codex_profile()    # append default-codex profile if none exists
-  → launch::check_claude_installed()  # `which claude` — false if missing
+  → cli::parse()                      # route to subcommand (add/edit/run/env/proxy) or TUI
+  → [TUI only] launch::check_claude_installed()  # `which claude` — false if missing
       → [if missing] launch::prompt_install()
           → prompt "Install now? [Y/n]"
           → [Y] run `curl -fsSL https://claude.ai/install.sh | bash`
@@ -257,7 +258,7 @@ graph TB
 - **`toml_edit` for surgical writes**: `config::toggle_skip_permissions`, `toggle_auth_type`, and `toggle_full_auto` use `toml_edit::DocumentMut` rather than re-serializing the entire config, so user comments and key ordering are preserved on every toggle.
 - **`skip_permissions` red visual indicator**: Profile list rows are rendered in `Color::Red` when `skip_permissions = true`, providing an immediate danger signal in the TUI.
 - **Dual add surface (CLI + TUI)**: `cct add` (CLI) and `a` key (TUI) both funnel through `config::append_profile`. The CLI selects the backend via `--backend` (default Claude); the TUI uses `active_backend`.
-- **Autoinstall on startup**: `main` calls `launch::check_claude_installed()` before entering the TUI. If `claude` is absent, `prompt_install()` offers to run the official installer interactively before raw mode is enabled.
+- **Autoinstall on TUI startup**: `run_tui` calls `launch::check_claude_installed()` before entering raw mode. If `claude` is absent, `prompt_install()` offers to run the official installer interactively. CLI subcommands (`proxy`, `add`, `edit`, `run`, `env`) never trigger the install prompt — the proxy daemon in particular must start without a `claude` binary present.
 - **`install.sh` curl|bash installer**: A standalone Bash script downloads the latest GitHub Release tarball, verifies it with `tar -tzf`, retries up to 3 times on download failure, and installs to `~/.local/bin`. Does not require root.
 
 <!-- END:architecture -->
