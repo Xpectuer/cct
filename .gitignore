@@ -6,3 +6,6 @@
 skills-lock.json
 .DS_Store
 .env
+
+# Never track worktrees
+.claude/worktrees/

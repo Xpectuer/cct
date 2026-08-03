@@ -75,7 +75,7 @@ Located at `~/Library/Application Support/cc-tui/profiles.toml` on macOS and `~/
 [[profiles]]
 name = "third-party"
 description = "Third-party Claude endpoint"
-model = "kimi-k2"                  # optional — maps to --model
+model = "MiniMax-M2.1"                  # optional — maps to --model
 skip_permissions = false            # optional — adds --dangerously-skip-permissions
 auth_type = "token"                 # optional — "token" uses ANTHROPIC_AUTH_TOKEN instead of ANTHROPIC_API_KEY
 extra_args = ["--verbose"]          # optional — appended verbatim
@@ -84,11 +84,11 @@ extra_args = ["--verbose"]          # optional — appended verbatim
 [profiles.env]
 ANTHROPIC_BASE_URL = "https://api.example.com/v1"
 ANTHROPIC_API_KEY = "sk-..."
-ANTHROPIC_MODEL = "kimi-k2"
-ANTHROPIC_SMALL_FAST_MODEL = "kimi-k2"
-ANTHROPIC_DEFAULT_SONNET_MODEL = "kimi-k2"
-ANTHROPIC_DEFAULT_OPUS_MODEL = "kimi-k2"
-ANTHROPIC_DEFAULT_HAIKU_MODEL = "kimi-k2"
+ANTHROPIC_MODEL = "MiniMax-M2.1"
+ANTHROPIC_SMALL_FAST_MODEL = "MiniMax-M2.1"
+ANTHROPIC_DEFAULT_SONNET_MODEL = "MiniMax-M2.1"
+ANTHROPIC_DEFAULT_OPUS_MODEL = "MiniMax-M2.1"
+ANTHROPIC_DEFAULT_HAIKU_MODEL = "MiniMax-M2.1"
 API_TIMEOUT_MS = "600000"
 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
 ```

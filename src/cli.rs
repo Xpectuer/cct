@@ -11,7 +11,7 @@ fn mask_key(key: &str) -> String {
     }
 }
 
-/// Parse the `--backend` flag: "claude" (default), "codex", or "kimi"
+/// Parse the `--backend` flag: "claude" (default) or "codex"
 /// (case-insensitive). Errors on unknown values.
 fn resolve_backend(backend: Option<String>) -> Result<config::Backend> {
     match backend.as_deref() {
@@ -19,9 +19,8 @@ fn resolve_backend(backend: Option<String>) -> Result<config::Backend> {
         Some(s) => match s.to_lowercase().as_str() {
             "claude" => Ok(config::Backend::Claude),
             "codex" => Ok(config::Backend::Codex),
-            "kimi" => Ok(config::Backend::Kimi),
             other => {
-                anyhow::bail!("Unknown backend: '{other}'. Expected one of: claude, codex, kimi")
+                anyhow::bail!("Unknown backend: '{other}'. Expected one of: claude, codex")
             }
         },
     }
@@ -180,7 +179,6 @@ pub fn run_add_with<R: BufRead, W: Write>(
         backend,
         full_auto: None,
         auth_type,
-        max_context_size: None,
     };
     config::append_profile(&profile)?;
     writeln!(writer, "Profile '{}' added.", name)?;
@@ -204,8 +202,7 @@ pub fn run_pick_profile_with<R: BufRead, W: Write>(
         let desc = p.description.as_deref().unwrap_or("");
         let tag = match p.backend {
             config::Backend::Claude => "[claude]",
-            config::Backend::Codex => "[codex] ",
-            config::Backend::Kimi => "[kimi]  ",
+            config::Backend::Codex => "[codex]",
         };
         writeln!(writer, "  {}) {} {} {}", i + 1, p.name, tag, desc)?;
     }
@@ -301,7 +298,6 @@ mod tests {
                 base_url: None,
                 full_auto: None,
                 auth_type: None,
-                max_context_size: None,
             },
             Profile {
                 name: "beta".into(),
@@ -314,7 +310,6 @@ mod tests {
                 base_url: None,
                 full_auto: None,
                 auth_type: None,
-                max_context_size: None,
             },
         ];
         let input = b"2\n";
@@ -340,7 +335,6 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: None,
-            max_context_size: None,
         }];
         let input = b"abc\n";
         let mut output: Vec<u8> = Vec::new();
@@ -361,7 +355,6 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: None,
-            max_context_size: None,
         }];
         let input = b"99\n";
         let mut output: Vec<u8> = Vec::new();
@@ -388,78 +381,8 @@ mod tests {
             resolve_backend(Some("codex".into())).unwrap(),
             config::Backend::Codex
         );
-        assert_eq!(
-            resolve_backend(Some("kimi".into())).unwrap(),
-            config::Backend::Kimi
-        );
-        // Case-insensitive
-        assert_eq!(
-            resolve_backend(Some("KIMI".into())).unwrap(),
-            config::Backend::Kimi
-        );
         // Unknown values are rejected
         let err = resolve_backend(Some("gpt".into())).unwrap_err();
         assert!(err.to_string().contains("Unknown backend"));
-    }
-
-    #[test]
-    #[serial]
-    fn cli_add_with_kimi_backend() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("profiles.toml");
-        std::fs::write(&path, "[[profiles]]\nname = \"existing\"\n").unwrap();
-        std::env::set_var("CCT_CONFIG", &path);
-
-        // Input: name, desc, base_url, api_key, model, fast_model, confirm
-        let input = b"my-kimi\nkimi desc\nhttps://api.kimi.com/v1\nsk-kimi\nkimi-k2\n\ny\n";
-        let mut output: Vec<u8> = Vec::new();
-        run_add_with(&input[..], &mut output, None, config::Backend::Kimi).unwrap();
-
-        let profiles = config::load_profiles().unwrap();
-        let p = profiles.iter().find(|p| p.name == "my-kimi").unwrap();
-        assert_eq!(p.backend, config::Backend::Kimi);
-        assert!(
-            p.max_context_size.is_none(),
-            "CLI add should leave max_context_size unset (auto)"
-        );
-        let env = p.env.as_ref().expect("env section should exist");
-        assert_eq!(env.len(), 3, "Kimi env should have exactly 3 vars");
-        assert_eq!(
-            env.get("ANTHROPIC_BASE_URL").map(String::as_str),
-            Some("https://api.kimi.com/v1")
-        );
-        assert_eq!(
-            env.get("ANTHROPIC_API_KEY").map(String::as_str),
-            Some("sk-kimi")
-        );
-        assert_eq!(
-            env.get("ANTHROPIC_MODEL").map(String::as_str),
-            Some("kimi-k2")
-        );
-
-        std::env::remove_var("CCT_CONFIG");
-    }
-
-    #[test]
-    fn pick_profile_shows_kimi_tag() {
-        let profiles = vec![Profile {
-            name: "kimi-prof".into(),
-            description: None,
-            env: None,
-            extra_args: None,
-            skip_permissions: None,
-            model: None,
-            backend: config::Backend::Kimi,
-            base_url: None,
-            full_auto: None,
-            auth_type: None,
-            max_context_size: None,
-        }];
-        let input = b"1\n";
-        let mut output: Vec<u8> = Vec::new();
-        let idx = run_pick_profile_with(&profiles, &input[..], &mut output).unwrap();
-        assert_eq!(idx, 0);
-        let out = String::from_utf8(output).unwrap();
-        assert!(out.contains("[kimi]"), "Expected [kimi] tag, got:\n{out}");
     }
 }

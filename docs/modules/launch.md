@@ -9,7 +9,7 @@ updated: 2026-08-02
 
 # launch Module Documentation
 
-> **Purpose**: Handles all process-lifecycle concerns for `cct`: builds CLI argument lists for the Claude, Codex, and Kimi backends, builds inline `--config` flags for the Codex provider (proxy/subscription modes), surgically writes Kimi provider/model entries into `~/.kimi-code/config.toml`, exec-replaces the current process, restores terminal state, and opens `$EDITOR` for config hot-reload.
+> **Purpose**: Handles all process-lifecycle concerns for `cct`: builds CLI argument lists for the Claude and Codex backends, builds inline `--config` flags for the Codex provider (proxy/subscription modes), exec-replaces the current process, restores terminal state, and opens `$EDITOR` for config hot-reload.
 > **Path**: src/launch.rs
 
 ---
@@ -34,7 +34,6 @@ updated: 2026-08-02
   - Pure dispatch function; chooses the correct binary and arg builder based on `profile.backend`.
   - `Backend::Claude` → `("claude", build_args(profile, with_continue))`
   - `Backend::Codex` → `("codex", build_codex_args(profile))` (ignores `with_continue`)
-  - `Backend::Kimi` → `("kimi", build_kimi_args(profile))` (ignores `with_continue`)
   - Used by integration tests to verify dispatch without exec-replacing the process.
 
 - `pub fn exec_claude(profile: &Profile, with_continue: bool) -> anyhow::Error`
@@ -65,28 +64,6 @@ updated: 2026-08-02
     - **Proxy mode** (default, API key): (1) `ensure_proxy_running` spawns the `cct proxy` daemon if it is not healthy; (2) `proxy::switch_profile` switches the daemon's upstream to the profile's `base_url`/`OPENAI_API_KEY`/`model` over the control socket; (3) injects `profile.env`; (4) exec-replaces with `codex <build_codex_proxy_config_args(model, port)> <approval/extra args>`.
     - **Subscription mode** (`auth_type = "subscription"`): sets `DISABLE_AUTOUPDATER=1`, injects `profile.env`, and exec-replaces with `codex --config model_provider=openai [--config model=<model>] <approval/extra args>` — no proxy, Codex's built-in OpenAI provider with OAuth.
   - `CODEX_HOME` is never set in either mode — Codex uses its default `~/.codex`, shared by all profiles (no `config.toml` or `auth.json` is written).
-  - **Never returns on success**.
-
-- `pub fn check_kimi_installed() -> bool`
-  - Runs `which kimi` to test whether the `kimi` binary is available in `$PATH`. Same pattern as `check_codex_installed`.
-
-- `pub fn prompt_install_kimi() -> Result<()>`
-  - Mirrors `prompt_install()` for claude; runs the official installer `curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash`.
-
-- `pub fn kimi_config_path() -> PathBuf`
-  - Returns the Kimi Code CLI config path: `$CCT_KIMI_CONFIG` if set (test override, mirrors `CCT_CONFIG` in `config::config_path`), else `~/.kimi-code/config.toml`.
-
-- `pub fn generate_kimi_config(profile: &Profile) -> Result<()>`
-  - Surgically writes this profile's entries into the kimi config via `toml_edit::DocumentMut`, creating the parent dir/file if missing and preserving all pre-existing tables (e.g. `managed:kimi-code` providers created by `kimi login`, `services.*`, `default_model`, `thinking`).
-  - Writes `[providers."<profile.name>"]` with `type = "kimi"`, `base_url` (from `profile.base_url`, else env `ANTHROPIC_BASE_URL`; normalized to `https://` scheme + `/v1` suffix with duplicate slashes collapsed), and `api_key` (env `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`).
-  - Writes `[models."<name>/<model>"]` (skipped when the profile has no model) with `provider`, `model`, `max_context_size` (explicit `profile.max_context_size` resolved via `config::resolve_max_context_size`, else model-based default: `k3*` → 1,000,000, otherwise 262,144), `capabilities = ["thinking", "always_thinking", "image_in", "video_in", "tool_use"]`, `display_name` (uppercased model), and — for `k3*` models only — `support_efforts = ["max"]` / `default_effort = "max"` (both keys are removed on re-generation when the model is not `k3*`).
-
-- `pub fn build_kimi_args(profile: &Profile) -> Vec<String>`
-  - Pure function with no side effects.
-  - `["-m", "<profile.name>/<model>"]` (model from `profile.model`, else env `ANTHROPIC_MODEL`; omitted entirely when no model), followed by `extra_args` verbatim.
-
-- `pub fn exec_kimi(profile: &Profile) -> anyhow::Error`
-  - Steps before exec-replace: (1) `check_kimi_installed()` — error if not found; (2) `generate_kimi_config(profile)`; (3) inject all `profile.env` pairs; (4) exec-replace with `kimi <build_kimi_args(profile)>`.
   - **Never returns on success**.
 
 - `pub fn command_exists(cmd: &str) -> bool`
@@ -132,10 +109,10 @@ None — all public surface is functions. The module consumes `crate::config::Pr
 - **Imports from `std::os::unix::process::CommandExt`** → Provides the `.exec()` method on `std::process::Command`. Unix-only; the module will not compile on Windows.
 - **Imports from `std::process::Command`** → Used to construct the exec targets and the `which` check.
 - **Imports from `std::env`** → `env::set_var` (inject env vars) and `env::var` (read `$EDITOR`).
-- **Imports from `std::{fs, path::Path, path::PathBuf}`** → `fs` used by `ensure_proxy_running` to redirect proxy stderr to the log file (`CCT_PROXY_LOG`); `Path`/`PathBuf` used for the proxy control socket path and `kimi_config_path()`.
+- **Imports from `std::{fs, path::Path, path::PathBuf}`** → `fs` used by `ensure_proxy_running` to redirect proxy stderr to the log file (`CCT_PROXY_LOG`); `Path`/`PathBuf` used for the proxy control socket path.
 - **Imports from `crossterm`** → `terminal::disable_raw_mode` and `execute!(stdout, LeaveAlternateScreen)` for terminal cleanup in `restore_terminal`.
 - **Imports from `anyhow`** → `Context` trait and `Result` alias.
-- **Imports from `dirs`** → `dirs::home_dir()` for the claude autoinstall prompt, `kimi_config_path()`, and `exec_with_env` resolution.
+- **Imports from `dirs`** → `dirs::home_dir()` for the claude autoinstall prompt and `exec_with_env` resolution.
 - **Does NOT depend on**: `app`, `ui`, or any async runtime.
 
 <!-- END:dependency_graph -->
@@ -152,8 +129,6 @@ None — all public surface is functions. The module consumes `crate::config::Pr
 - **`exec_claude`** — Two permanent side effects: (1) env mutation via `env::set_var`; (2) process replacement via `CommandExt::exec()`. Terminal cleanup (`restore_terminal`) must be called by the caller before `exec_claude`.
 
 - **`exec_codex`** — Side effects before exec: proxy mode ensures/spawns the `cct proxy` daemon and switches its upstream over the control socket; both modes inject `profile.env` via `env::set_var`; process replacement. No Codex config file is written and `CODEX_HOME` is never set. `restore_terminal` must be called before `exec_codex`.
-
-- **`generate_kimi_config`** — File I/O side effect: creates `~/.kimi-code/` and surgically edits `config.toml` in place. Path is overridable via `CCT_KIMI_CONFIG` so unit tests run against a temp dir and never touch the real file. `build_kimi_args` is pure, like the other arg builders.
 
 - **`restore_terminal`** — Interacts with global terminal state. Errors suppressed intentionally.
 
