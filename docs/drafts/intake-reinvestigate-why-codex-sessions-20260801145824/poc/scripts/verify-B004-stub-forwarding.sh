@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo "[PoC B004] proxy 指向 stub 上游: 转发带 Bearer key, SSE 流式返回"
 source "$SCRIPT_DIR/setup-smoke.sh"
 
-if "$CCT_BIN" run smoke-a >"$SMOKE_DIR/run-a.log" 2>&1; then :; else
+if "$CCT_BIN" run smoke-a </dev/null >"$SMOKE_DIR/run-a.log" 2>&1; then :; else
   echo "[FAIL] B004: cct run smoke-a 失败 — $(tail -3 "$SMOKE_DIR/run-a.log" | tr '\n' ' ')"
   exit 1
 fi

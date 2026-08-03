@@ -17,7 +17,7 @@ TMP=$(mktemp -d)
 SOCK="${CCT_PROXY_SOCKET:-$TMP/proxy.sock}"
 export CCT_PROXY_SOCKET="$SOCK"
 export CCT_PROXY_PORT="${PROXY_PORT:-19191}"
-cleanup() { kill "${PROXY_PID:-}" 2>/dev/null; rm -f "$SOCK"; rm -rf "$TMP"; }
+cleanup() { [ -n "${PROXY_PID:-}" ] && kill "$PROXY_PID" 2>/dev/null || true; rm -f "$SOCK"; rm -rf "$TMP"; }
 trap cleanup EXIT
 
 "$CCT_BIN" proxy start >/dev/null 2>&1 & PROXY_PID=$!
@@ -28,12 +28,14 @@ done
 [ -S "$SOCK" ] || { echo "[FAIL] B001: proxy socket 未出现 — 启动失败"; exit 1; }
 
 # 并发: 5 个 status 控制命令 + 1 个 HTTP 请求
+NCS=()
 for _ in $(seq 1 5); do
-  printf '{"cmd":"status"}\n' | nc -U -w 2 "$SOCK" >/dev/null 2>&1 &
+  printf '{"cmd":"status"}\n' | nc -U -w 2 "$SOCK" >/dev/null 2>&1 & NCS+=($!)
 done
 HTTP=$(curl -s --noproxy '*' --max-time 3 -o /dev/null -w "%{http_code}" \
   "http://127.0.0.1:$CCT_PROXY_PORT/v1/models" 2>&1) && RC=0 || RC=$?
-wait
+# 只等并发任务 PID — 无参 wait 会连带等待长驻 proxy daemon 导致挂起
+wait "${NCS[@]}" 2>/dev/null || true
 
 if [ "$RC" = 0 ]; then
   echo "[PASS] B001: HTTP 在 3s 内得到响应 (HTTP $HTTP)"

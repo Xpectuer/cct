@@ -127,39 +127,50 @@ pub fn build_codex_proxy_config_args(model: &str, port: u16) -> Vec<String> {
 
 /// Ensure the proxy is running. Spawns `cct proxy` if needed.
 ///
-/// When `CCT_PROXY_LOG` is set, stderr is written to `~/.config/cc-tui/proxy.log`
-/// instead of being discarded — useful for debugging proxy behavior.
-pub fn ensure_proxy_running(_port: u16, socket_path: &Path) -> Result<()> {
+/// The spawn target comes from `CCT_PROXY_BIN` (defaults to the current
+/// executable), so tests can inject a fake spawn target. When `CCT_PROXY_LOG`
+/// is set, stderr is written to `~/.config/cc-tui/proxy.log` instead of being
+/// discarded — useful for debugging proxy behavior.
+pub fn ensure_proxy_running(port: u16, socket_path: &Path) -> Result<()> {
     if crate::proxy::check_proxy_running(socket_path) {
         return Ok(());
     }
-    let exe = std::env::current_exe().context("cannot find own executable")?;
-    let mut cmd = std::process::Command::new(exe);
+    // 端口空闲判定：试探 bind（先 drop 再 spawn），避免 TOCTOU 竞态下
+    // unlink 并发启动的活 proxy。探测失败 + 端口被占 → 报错退出（lsof 诊断）。
+    if std::net::TcpListener::bind(("127.0.0.1", port)).is_err() {
+        anyhow::bail!("{}", crate::proxy::port_conflict_message(port));
+    }
+    let proxy_bin = env::var("CCT_PROXY_BIN").unwrap_or_else(|_| {
+        env::current_exe()
+            .ok()
+            .and_then(|p| p.to_str().map(String::from))
+            .unwrap_or_else(|| "cct".to_string())
+    });
+    let mut cmd = Command::new(&proxy_bin);
     cmd.arg("proxy")
         .arg("start")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null());
 
-    if std::env::var("CCT_PROXY_LOG").is_ok() {
-        let log_path = crate::proxy::proxy_log_path();
-        if let Ok(file) = std::fs::File::create(&log_path) {
-            cmd.stderr(file);
-        }
-    } else {
+    if env::var("CCT_PROXY_LOG").is_err() {
         cmd.stderr(std::process::Stdio::null());
+    } else if let Ok(file) = fs::File::create(crate::proxy::proxy_log_path()) {
+        cmd.stderr(file);
     }
 
     cmd.spawn().context("failed to spawn cct proxy")?;
 
-    // Wait up to 5s for the socket to appear.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while std::time::Instant::now() < deadline {
+    // 就绪探测：复用 PROBE_TIMEOUT × PROBE_RETRIES 常量。
+    for _ in 0..crate::proxy::PROBE_RETRIES {
         if crate::proxy::check_proxy_running(socket_path) {
             return Ok(());
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(crate::proxy::PROBE_TIMEOUT);
     }
-    anyhow::bail!("proxy did not start within 5 seconds")
+    anyhow::bail!(
+        "proxy did not become healthy after {} probes",
+        crate::proxy::PROBE_RETRIES
+    )
 }
 
 /// Build the CLI argument list for `codex` from a profile. Pure — no side effects.

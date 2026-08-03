@@ -40,9 +40,9 @@ revision: 1
 | B008 | cwd 过滤: 跨仓库默认不可见, 追加 --all 可见 | 8 | Y | cli | verify-B008-cwd-filter.sh | repo2 默认无标记; --all 后含标记 |
 | B009 | 活 proxy 时手动 `cct proxy start` 报错退出, 不删 socket 不 panic | 9 | N | process | verify-B009-double-start.sh | 非 0 退出 + socket 完好 + 原 proxy 仍响应 |
 | B010 | 契约测试覆盖（并发/僵尸/占端口/双启动竞态/转发/脱敏/stop 超时） | 10 | N | cli | verify-B010-contract-tests.sh | cargo test proxy + integration 全绿 |
-| B011 | install-script.md 含旧实例迁移说明（一次性升级指引） | 11 | N | filesystem | verify-B011-migration-docs.sh | 文档含 29182/手动终止/遗留 socket 说明（当前: 缺失 FAIL） |
+| B011 | install-script.md 含旧实例迁移说明（一次性升级指引） | 11 | N | filesystem | verify-B011-migration-docs.sh | 文档含 29182/手动终止/遗留 socket 说明（当前: PASS，TC-23） |
 | B012 | L2 冒烟前置: 旧实例 29182 已终止 + 端口空闲 | 12 | N | process | verify-B012-l2-prereqs.sh | 29182 不运行 + 端口无占用（当前: 可能 FAIL = 提示先迁移） |
-| B013 | 5 份文档无 per-profile CODEX_HOME / generate_codex_config 陈旧叙述 + resume 过滤语义说明 | 13 | N | filesystem | verify-B013-doc-cleanup.sh | 5 文档零陈旧叙述 + 语义说明存在（当前: 4 文档 FAIL） |
+| B013 | 5 份文档无 per-profile CODEX_HOME / generate_codex_config 陈旧叙述 + resume 过滤语义说明 | 13 | N | filesystem | verify-B013-doc-cleanup.sh | 5 文档零陈旧叙述 + 语义说明存在（当前: PASS，TC-23） |
 | B014 | 不写 Codex 配置（快照回归）+ 既有接口不变 | 14 | N | cli | verify-B014-interface-frozen.sh | 回归测试绿 + CCT_PROXY_PORT/LOG + 命令接口仍在 |
 | B015 | 分层诊断: curl --noproxy '*' 验证 proxy 层存活 | 15 | N | network | verify-B015-layered-diag.sh | 任意响应码（502/404 亦存活）; 超时 = 死锁 FAIL; 无监听 SKIP |
 
@@ -70,3 +70,11 @@ revision: 1
 | Date | Total | Pass | Fail | Skip | Notes |
 |------|-------|------|------|------|-------|
 | — | — | — | — | — | Run `./run-all.sh` to populate |
+| 2026-08-01（修复前） | 15 | 11 | 4 | 0 | 修复前基线（只读脚本 B011/B012/B013/B015 FAIL；证据 refs/proxy-deadlock-diagnosis.md + session-log）。迁移前置（plan Step 15）确认记录：`ps -p 29182` 显示旧版 cct proxy 实例 29182 已不存在、端口 19191 空闲 → 无需 kill，直接继续迁移（用户已确认） |
+| 2026-08-01 21:31（修复后全量，run 1） | 15 | 3 | 11 | 1 | config.env 未创建 → B001-B009 环境性 FAIL（CCT_BIN/TEST_API_KEY 缺失）；B010/B012/B014 PASS；B011/B013 文档缺口（TC-23 范围）；B015 SKIP（无 proxy 监听）。run-all.sh 首个完整输出 |
+| 2026-08-01 21:33（修复后全量，run 2，config.env 已建） | 15 | — | — | — | run-all.sh 卡死 B001 未完成：verify-B001 第 36 行 `wait`（无参）等待全部后台任务含长驻 proxy daemon → 无限挂起（脚本 harness bug，与修复无关）；已 SIGTERM 终止 |
+| 2026-08-02（修复后单脚本 + 人工等价探针） | 15 | — | — | — | B001 人工探针 PASS（<3s 响应）；B002/B009(隔离)/B010/B012/B014/B015 PASS；B003/B005 行为正确但退出码被 EXIT trap `kill ""`（set -e 下）覆写为 1；B004/B006/B007/B008 FAIL 根因：codex 0.146 需 item-based SSE（`response.output_item.added`），stub 缺该事件 → "OutputTextDelta without active item"（证据 /tmp/codex-direct/codex.log）；B011/B013 文档缺口（TC-23） |
+| 2026-08-02（修复后全量，harness 修复后 run-all） | 15 | 13 | 2 | 0 | 修复后全量：4 类 harness 修复（B001 无参 `wait` 挂起 / EXIT trap `kill ""` 退出码覆写 / stub SSE 改 item-based / daemon 生命周期清理）后 run-all.sh 完整跑完不再挂起；B001-B010、B012、B014、B015 全 PASS，Skip 0；Fail 2 = B011/B013（TC-23 文档收尾范围，预期内）。输出留存 /tmp/run-all-fix1.log |
+| 2026-08-02（修复后逐脚本单独运行） | 15 | 13 | 2 | 0 | 逐脚本串行各自独立运行 PASS（exit 0）：B001 0.18s HTTP 502 不挂起；B002 死 socket 自愈；B003 报错诊断且占用者存活；B004 codex `-o` 非空 + Bearer 转发；B005 脱敏断言真实生效；B006/B007/B008 可见性三查；B009 双启动报错且原 proxy 完好；B010/B014 契约测试全绿；B012 预检通过；B015 自起实例 proxy 层存活 HTTP 502；B011/B013 FAIL（TC-23）。详见 docs/procs/tdd-proxy-deadlock-fix-20260801172308/logs/run_all_full_pass-fix-attempt-1.md |
+| 2026-08-02（doc_cleanup_final 后全量 run-all） | 15 | 15 | 0 | 0 | TC-23 文档收尾完成（B011 迁移说明 + B013 五文档清理 + resume 语义）后 run-all.sh 全量闭环：B001-B015 全 PASS、Skip 0、Fail 0。证据 logs/doc_cleanup_final-green.md |
+| 2026-08-02（审计修复后全量 run-all） | 15 | 15 | 0 | 0 | 审计修复后确认：B006 断言改为 session-id 对比 + rollout 复用计数（spec AC-6），B007 跨 provider 不可见改 rollout 计数 + id 级核对、显式恢复 6 旗标改经 `cct run` 真实函数生成（spec AC-7）——两断言在错误实现下可 FAIL（可证伪）。run-all.sh 15/15/0/0。完整原始输出 logs/run_all_full_pass-audit-fix1.md |

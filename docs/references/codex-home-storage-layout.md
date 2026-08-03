@@ -1,52 +1,50 @@
 ---
 title: "Reference: Codex CODEX_HOME Storage Layout"
 doc_type: reference
-brief: "What Codex stores under per-profile CODEX_HOME in cct, with special focus on sqlite state and log databases"
+brief: "What Codex stores under the shared default CODEX_HOME (~/.codex) in cct, with special focus on sqlite state and log databases"
 confidence: verified
 created: 2026-04-03
-updated: 2026-04-03
-revision: 1
+updated: 2026-08-02
+revision: 2
 ---
 
 # Reference: Codex CODEX_HOME Storage Layout
 
 ## Purpose
 
-This document records what `cct` places in a Codex profile's `CODEX_HOME` and what the
-observed sqlite files there most likely do.
+This document records what Codex keeps under its default `CODEX_HOME` (`~/.codex`) —
+`cct` no longer sets a per-profile `CODEX_HOME` — and what the observed sqlite files
+there most likely do.
 
 The goal is to make future Codex-backend work less guessy when it needs to inspect,
-preserve, or reason about profile-local Codex state.
+preserve, or reason about Codex state shared across profiles.
 
 ## Verified Launch Boundary
 
-`cct` itself does not implement sqlite persistence for Codex state.
+`cct` itself does not implement sqlite persistence for Codex state, and no longer writes
+any Codex config or auth files.
 
 What `cct` does at launch time is:
 
-1. Compute a per-profile `CODEX_HOME`
-2. Write `config.toml`
-3. Write `auth.json`
-4. Export `CODEX_HOME`
-5. `exec` into `codex`
+1. Ensure the local `cct proxy` daemon is running (spawn it if unhealthy)
+2. Switch the proxy to the profile's upstream (`base_url` / `OPENAI_API_KEY` / `model`)
+3. Pass the custom provider via 6 inline `--config` flags (`build_codex_proxy_config_args`)
+4. `exec` into `codex`
 
 This is verified in `src/launch.rs`:
 
-- `exec_codex()` builds `dirs::config_dir()/cc-tui/codex/<profile-name>`
-- `generate_codex_config()` writes the profile-derived Codex config
-- `write_codex_auth()` writes `auth.json`
-- `env::set_var("CODEX_HOME", ...)` hands the directory to Codex before `exec`
-
-On macOS, `dirs::config_dir()` resolves to `~/Library/Application Support`, so the
-effective path is:
+- `exec_codex()` dispatches to `exec_codex_proxy` (API key) or `exec_codex_subscription` (OAuth)
+- `build_codex_proxy_config_args(model, port)` injects `model_provider=custom`,
+  `model=<model>`, and the `model_providers.custom.*` settings as `--config` flags
+- `CODEX_HOME` is never set — Codex uses its default directory, so the effective path is:
 
 ```text
-~/Library/Application Support/cc-tui/codex/<profile-name>
+~/.codex
 ```
 
-## Observed Per-Profile Files
+## Observed Files Under ~/.codex
 
-A sampled profile directory contained:
+A sampled Codex home directory (shared by all profiles) contained:
 
 ```text
 config.toml
@@ -66,9 +64,9 @@ shell_snapshots/
 tmp/
 ```
 
-This layout shows that a profile-local `CODEX_HOME` is not just launch config; it is a
-full Codex workspace containing conversation metadata, logs, agent assets, and local
-state.
+This layout shows that the shared `CODEX_HOME` is a full Codex workspace containing
+conversation metadata, logs, agent assets, and local state — shared by every `cct`
+profile (same provider, same directory).
 
 ## SQLite Files
 
@@ -165,15 +163,29 @@ Practical implications:
 
 - Do not hand-edit these sqlite files to implement user-facing features
 - Prefer `profiles.toml` as the source of truth for launcher-owned settings
-- Let launch derive `config.toml` and `auth.json`
+- Do not write Codex config/auth files — provider config is injected via `--config` flags
+  and the API key lives inside the proxy (switched over the control socket), so there is
+  nothing to persist
 - Treat sqlite schema details as implementation clues, not a stable external API
 
 This follows the same rule already learned for `auth.json`: external-tool on-disk formats
 must be verified from real behavior, not guessed.
 
+## Session Visibility (resume)
+
+Because `cct` never sets `CODEX_HOME`, session state lives in the shared `~/.codex` and
+`codex resume` follows the CLI's own filtering rules:
+
+- `codex resume` lists only sessions whose `model_provider_id` matches the current
+  provider **and** whose `cwd` matches the current working directory
+- `codex resume --all` bypasses the cwd filter but cannot disable the provider filter
+- an explicit `codex resume <session-id>` bypasses both filters
+- same-provider sessions are visible across `cct` profiles — all profiles physically
+  share `~/.codex` (no per-profile `CODEX_HOME`)
+
 ## Related
 
-- `src/launch.rs` — Codex launch boundary and `CODEX_HOME` setup
+- `src/launch.rs` — Codex launch boundary (proxy mode `--config` flags; `CODEX_HOME` untouched)
 - `docs/references/codex-backend-development-guide.md` — Codex backend launch contract
 - `docs/lessons/external-tool-config-schema-must-be-verified.md` — why Codex file formats
   should be verified from working examples

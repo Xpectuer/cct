@@ -3,13 +3,13 @@ doc_type: module
 module_name: "launch"
 module_path: "src/launch.rs"
 generated_by: mci-phase-2
-revision: 3
-updated: 2026-07-17
+revision: 4
+updated: 2026-08-02
 ---
 
 # launch Module Documentation
 
-> **Purpose**: Handles all process-lifecycle concerns for `cct`: builds CLI argument lists for the Claude, Codex, and Kimi backends, generates Codex config files, surgically writes Kimi provider/model entries into `~/.kimi-code/config.toml`, exec-replaces the current process, restores terminal state, and opens `$EDITOR` for config hot-reload.
+> **Purpose**: Handles all process-lifecycle concerns for `cct`: builds CLI argument lists for the Claude, Codex, and Kimi backends, builds inline `--config` flags for the Codex provider (proxy/subscription modes), surgically writes Kimi provider/model entries into `~/.kimi-code/config.toml`, exec-replaces the current process, restores terminal state, and opens `$EDITOR` for config hot-reload.
 > **Path**: src/launch.rs
 
 ---
@@ -48,44 +48,23 @@ updated: 2026-07-17
   - Runs `which codex` to test whether the `codex` binary is available in `$PATH`.
   - Returns `true` if `which` exits with status 0; `false` on non-zero exit or any error.
 
-- `pub fn generate_codex_config(profile: &Profile, codex_home: &Path) -> anyhow::Result<()>`
-  - Writes `<codex_home>/config.toml` with the following content derived from the profile:
-    ```toml
-    model_provider = "custom"
-    model = "<profile.model or gpt-4.1>"
-    [model_providers.custom]
-    name = "<profile.name>"
-    base_url = "<profile.base_url or empty string>"
-    requires_openai_auth = true
-    [features]
-    default_mode_request_user_input = true
-    ```
-  - Creates parent directories if they do not exist.
-  - **Surgical merge, not full rewrite**: an existing `config.toml` is parsed with `toml_edit` and only the cct-owned keys are refreshed (`model_provider`, `model`, `model_providers.custom.*`). Hand-edited sections (`[features]`, `[projects]`, …) survive the next launch.
-  - `[features] default_mode_request_user_input = true` is written only when absent, so an explicit user override wins.
-  - Nested tables are created explicitly (`ensure_subtable`) so they render as header-style sections (`[model_providers.custom]`), not inline tables, and values from profile fields are TOML-escaped by `toml_edit`.
-  - `codex_home` is separated from the function body (testable with a temp dir).
+- `pub fn build_codex_proxy_config_args(model: &str, port: u16) -> Vec<String>`
+  - Pure function with no side effects.
+  - Builds 6 inline `--config` flags that configure the custom provider pointing at the local proxy: `model_provider=custom`, `model=<model>`, `model_providers.custom.name=cct-proxy`, `model_providers.custom.base_url=http://127.0.0.1:<port>/v1`, `model_providers.custom.wire_api=responses`, `model_providers.custom.env_key=OPENAI_API_KEY`.
+  - Replaces the old `config.toml` approach: `CODEX_HOME` is left at its default (`~/.codex`) so all profiles share history/sessions.
 
-- `pub fn write_codex_auth(profile: &Profile, codex_home: &Path) -> Result<()>`
-  - Writes `<codex_home>/auth.json` with `{"auth_mode": "apikey", "OPENAI_API_KEY": "<env.OPENAI_API_KEY>"}` when the profile has a key.
-  - Generated with `serde_json` (keys are properly escaped).
-  - When the profile has no key, a stale `auth.json` from an earlier launch is **removed** — an old key must not keep being served after the profile's key is dropped.
-  - The codex API key may also be written at the profile top level (`api_key = "..."`); `config::Profile`'s deserializer injects it into `env.OPENAI_API_KEY` for Codex profiles.
+- **No `config.toml` or `auth.json` is written for Codex**: the API key travels to the local proxy over the control socket via `proxy::switch_profile`, and the proxy injects it as the `Authorization` header when forwarding. The profile top-level `api_key = "..."` shorthand is deserialized into `env.OPENAI_API_KEY` for Codex profiles.
 
 - `pub fn build_codex_args(profile: &Profile) -> Vec<String>`
   - Pure function with no side effects.
-  - Argument ordering: `--full-auto` (if `profile.full_auto` is `Some(true)`), then each element of `profile.extra_args` in order.
-  - Does NOT include `--model`; the model is passed to codex via `config.toml` (through `CODEX_HOME`).
+  - Builds the shared approval/extra args (`build_shared_codex_args`): the approval flag matching `profile.full_auto` (`--ask-for-approval never|untrusted`, `--dangerously-bypass-approvals-and-sandbox`, or nothing), then each element of `profile.extra_args` in order.
+  - Does NOT include `--model` or provider config — those arrive via `--config` flags built by `build_codex_proxy_config_args` (proxy mode) or `build_codex_subscription_args` (subscription mode).
 
 - `pub fn exec_codex(profile: &Profile) -> anyhow::Error`
-  - Steps performed before exec-replace:
-    1. Checks `codex` binary is installed via `check_codex_installed()`; returns error if not.
-    2. Resolves `codex_home` to `~/.config/cc-tui/codex/<profile-name>` via `dirs::config_dir()` (per-profile `CODEX_HOME`).
-    3. Calls `generate_codex_config(profile, &codex_home)` to write `config.toml`; returns error on failure.
-    4. Calls `write_codex_auth(profile, &codex_home)` to write (or clean up) `auth.json`; returns error on failure.
-    5. Sets `CODEX_HOME` environment variable to `codex_home`.
-    6. Injects all key-value pairs from `profile.env` (contains `OPENAI_API_KEY`).
-    7. Exec-replaces with `codex <build_codex_args(profile)>`.
+  - Checks `codex` is installed via `check_codex_installed()`; returns error if not. Then dispatches on `auth_type`:
+    - **Proxy mode** (default, API key): (1) `ensure_proxy_running` spawns the `cct proxy` daemon if it is not healthy; (2) `proxy::switch_profile` switches the daemon's upstream to the profile's `base_url`/`OPENAI_API_KEY`/`model` over the control socket; (3) injects `profile.env`; (4) exec-replaces with `codex <build_codex_proxy_config_args(model, port)> <approval/extra args>`.
+    - **Subscription mode** (`auth_type = "subscription"`): sets `DISABLE_AUTOUPDATER=1`, injects `profile.env`, and exec-replaces with `codex --config model_provider=openai [--config model=<model>] <approval/extra args>` — no proxy, Codex's built-in OpenAI provider with OAuth.
+  - `CODEX_HOME` is never set in either mode — Codex uses its default `~/.codex`, shared by all profiles (no `config.toml` or `auth.json` is written).
   - **Never returns on success**.
 
 - `pub fn check_kimi_installed() -> bool`
@@ -153,10 +132,10 @@ None — all public surface is functions. The module consumes `crate::config::Pr
 - **Imports from `std::os::unix::process::CommandExt`** → Provides the `.exec()` method on `std::process::Command`. Unix-only; the module will not compile on Windows.
 - **Imports from `std::process::Command`** → Used to construct the exec targets and the `which` check.
 - **Imports from `std::env`** → `env::set_var` (inject env vars) and `env::var` (read `$EDITOR`).
-- **Imports from `std::{fs, path::Path, path::PathBuf}`** → Used by `generate_codex_config` to create directories and write the config file.
+- **Imports from `std::{fs, path::Path, path::PathBuf}`** → `fs` used by `ensure_proxy_running` to redirect proxy stderr to the log file (`CCT_PROXY_LOG`); `Path`/`PathBuf` used for the proxy control socket path and `kimi_config_path()`.
 - **Imports from `crossterm`** → `terminal::disable_raw_mode` and `execute!(stdout, LeaveAlternateScreen)` for terminal cleanup in `restore_terminal`.
 - **Imports from `anyhow`** → `Context` trait and `Result` alias.
-- **Imports from `dirs`** → `dirs::config_dir()` in `prompt_install` (claude fallback) and in `exec_codex` (to resolve `codex_home` path).
+- **Imports from `dirs`** → `dirs::home_dir()` for the claude autoinstall prompt, `kimi_config_path()`, and `exec_with_env` resolution.
 - **Does NOT depend on**: `app`, `ui`, or any async runtime.
 
 <!-- END:dependency_graph -->
@@ -172,9 +151,7 @@ None — all public surface is functions. The module consumes `crate::config::Pr
 
 - **`exec_claude`** — Two permanent side effects: (1) env mutation via `env::set_var`; (2) process replacement via `CommandExt::exec()`. Terminal cleanup (`restore_terminal`) must be called by the caller before `exec_claude`.
 
-- **`exec_codex`** — Four side effects before exec: (1) writes `~/.config/cct-tui/codex/config.toml`; (2) sets `CODEX_HOME` env var; (3) sets `OPENAI_API_KEY` from `profile.env`; (4) process replacement. `restore_terminal` must be called before `exec_codex`.
-
-- **`generate_codex_config`** — File I/O side effect: creates directory and writes config.toml. It is separated from `exec_codex` to allow unit testing against a temp directory without exec-replacing the process.
+- **`exec_codex`** — Side effects before exec: proxy mode ensures/spawns the `cct proxy` daemon and switches its upstream over the control socket; both modes inject `profile.env` via `env::set_var`; process replacement. No Codex config file is written and `CODEX_HOME` is never set. `restore_terminal` must be called before `exec_codex`.
 
 - **`generate_kimi_config`** — File I/O side effect: creates `~/.kimi-code/` and surgically edits `config.toml` in place. Path is overridable via `CCT_KIMI_CONFIG` so unit tests run against a temp dir and never touch the real file. `build_kimi_args` is pure, like the other arg builders.
 
@@ -291,4 +268,4 @@ let args_continue = launch::build_args(&profile, true);
 ---
 
 **Template Version**: 2.0
-**Last Updated**: 2026-07-17 (revision 3 — Kimi backend: check_kimi_installed, prompt_install_kimi, kimi_config_path, generate_kimi_config, build_kimi_args, exec_kimi, build_launch_command Kimi arm)
+**Last Updated**: 2026-08-02 (revision 4 — Codex launch via local proxy: config.toml/auth.json generation removed, build_codex_proxy_config_args inline `--config` flags, CODEX_HOME never set)

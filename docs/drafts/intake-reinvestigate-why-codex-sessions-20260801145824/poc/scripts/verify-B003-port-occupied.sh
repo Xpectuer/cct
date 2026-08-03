@@ -15,7 +15,7 @@ echo "[PoC B003] 端口被占时明确报错, 不 panic 不自动终止"
 TMP=$(mktemp -d)
 export CCT_PROXY_PORT="${PROXY_PORT:-19191}"
 export CCT_PROXY_SOCKET="${CCT_PROXY_SOCKET:-$TMP/proxy.sock}"
-cleanup() { kill "${OCCUPY_PID:-}" 2>/dev/null; kill "${PROXY_PID:-}" 2>/dev/null; rm -rf "$TMP"; }
+cleanup() { [ -n "${OCCUPY_PID:-}" ] && kill "$OCCUPY_PID" 2>/dev/null || true; [ -n "${PROXY_PID:-}" ] && kill "$PROXY_PID" 2>/dev/null || true; rm -rf "$TMP"; }
 trap cleanup EXIT
 
 # 假占用者: 绑定 TCP 端口但不响应控制 socket（模拟旧版死锁/第三方进程）

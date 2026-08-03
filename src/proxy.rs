@@ -1,6 +1,6 @@
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::Shutdown;
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
@@ -13,7 +13,7 @@ use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use serde::{Deserialize, Serialize};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, UnixListener as TokioUnixListener};
 
 // ── shared state ──────────────────────────────────────────────────────────
 
@@ -62,8 +62,12 @@ pub fn proxy_port() -> u16 {
         .unwrap_or(19191)
 }
 
-/// Path to the Unix domain socket used for control commands.
+/// Path to the Unix domain socket used for control commands. Override with
+/// `CCT_PROXY_SOCKET`.
 pub fn proxy_socket_path() -> PathBuf {
+    if let Ok(p) = std::env::var("CCT_PROXY_SOCKET") {
+        return PathBuf::from(p);
+    }
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("~/.config"))
         .join("cc-tui")
@@ -87,14 +91,36 @@ macro_rules! log_proxy {
     };
 }
 
-/// Check whether the proxy daemon is currently running.
+pub const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
+pub const PROBE_RETRIES: u32 = 3;
+pub const STOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Check whether the proxy daemon is healthy — application-level probe:
+/// sends `status` over the control socket and expects a response within
+/// PROBE_TIMEOUT. (Kernel-level connect alone cannot detect a dead proxy.)
 pub fn check_proxy_running(socket_path: &Path) -> bool {
-    UnixStream::connect(socket_path).is_ok()
+    let cmd = ControlCommand {
+        cmd: "status".into(),
+        base_url: None,
+        api_key: None,
+        model: None,
+    };
+    send_control_timeout(socket_path, &cmd, PROBE_TIMEOUT).is_ok()
 }
 
 /// Send a JSON control command to the proxy and return the response.
 pub fn send_control(socket_path: &Path, cmd: &ControlCommand) -> io::Result<ControlResponse> {
+    send_control_timeout(socket_path, cmd, PROBE_TIMEOUT)
+}
+
+fn send_control_timeout(
+    socket_path: &Path,
+    cmd: &ControlCommand,
+    timeout: std::time::Duration,
+) -> io::Result<ControlResponse> {
     let mut stream = UnixStream::connect(socket_path)?;
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(timeout))?;
     let payload =
         serde_json::to_vec(cmd).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     stream.write_all(&payload)?;
@@ -127,6 +153,12 @@ pub fn switch_profile(
         model: Some(model.into()),
     };
     let resp = send_control(socket_path, &cmd)?;
+    status_to_result(resp)
+}
+
+/// Convert a control response into a `Result`: `"ok"` → Ok, anything else →
+/// Err carrying the response message.
+fn status_to_result(resp: ControlResponse) -> io::Result<()> {
     if resp.status == "ok" {
         Ok(())
     } else {
@@ -144,8 +176,8 @@ pub fn shutdown_proxy(socket_path: &Path) -> io::Result<()> {
         api_key: None,
         model: None,
     };
-    let _ = send_control(socket_path, &cmd);
-    Ok(())
+    let resp = send_control_timeout(socket_path, &cmd, STOP_TIMEOUT)?;
+    status_to_result(resp)
 }
 
 // ── proxy internals ───────────────────────────────────────────────────────
@@ -175,6 +207,28 @@ pub fn run_foreground(port: u16) -> io::Result<()> {
     Ok(())
 }
 
+/// Print "another live proxy owns the control socket" and exit(1) — never panic.
+fn exit_socket_owned(socket_path: &Path) -> ! {
+    eprintln!("[cct-proxy] another live proxy owns control socket {socket_path:?} — exiting");
+    std::process::exit(1);
+}
+
+/// Print the control-socket bind failure and exit(1) — never panic.
+fn exit_bind_failed(socket_path: &Path, err: &io::Error) -> ! {
+    eprintln!("[cct-proxy] control socket bind {socket_path:?} failed: {err}");
+    std::process::exit(1);
+}
+
+/// True when `bind` failed because the socket path is already taken: Linux
+/// reports EADDRINUSE, macOS/BSD EEXIST（实测双启动竞态本机 macOS 走 EEXIST，
+/// os error 17）——两分支同一收敛语义。
+fn is_bind_conflict(e: &io::Error) -> bool {
+    matches!(
+        e.kind(),
+        io::ErrorKind::AddrInUse | io::ErrorKind::AlreadyExists
+    )
+}
+
 async fn run_proxy(port: u16, socket_path: &Path) {
     log_proxy!("starting on 127.0.0.1:{port}, control socket {socket_path:?}");
 
@@ -182,22 +236,64 @@ async fn run_proxy(port: u16, socket_path: &Path) {
         active: RwLock::new(ActiveProfile::default()),
     });
 
-    let _ = std::fs::remove_file(socket_path);
+    // TCP bind 先行——双启动竞态的唯一仲裁者（方向 A，见 findings/
+    // double_start_race_one_wins-analysis.md）：败者在 TCP EADDRINUSE 处直接
+    // exit(1)（port_conflict_message 诊断），根本走不到控制 bind——不重绑、不删除、
+    // 不留下任何 socket 文件。活 proxy 必然持有 TCP，因此控制段探测-删除只会对
+    // 真僵尸文件执行（约束 #3/#5 意图）。AC3 占端口行为与消息文本不变。
+    let addr = format!("127.0.0.1:{port}");
+    let listener = match TcpListener::bind(&addr).await {
+        Ok(listener) => listener,
+        Err(e) => {
+            eprintln!("[cct-proxy] TCP bind {addr} failed: {e}");
+            eprintln!("[cct-proxy] {}", port_conflict_message(port));
+            // exit(1) 而非 panic/return：panic 输出违反占用诊断契约（不 panic + 报错
+            // 文本），return 则 `cct proxy start` 静默以 0 退出。
+            std::process::exit(1);
+        }
+    };
 
-    let ctl_listener = UnixListener::bind(socket_path).expect("bind proxy control socket");
+    // 先绑后删（delete-on-conflict）：不预先删除路径——预删除可能破坏并发启动者
+    // 刚绑定的活 socket（约束 #5 意图：不破坏活 proxy 控制通道）。删除只发生在
+    // 探测确认死 socket（僵尸）之后，与父进程 ensure_proxy_running 的试探 bind
+    // 同一模式（约束 #3）。TCP 先行后，双启动败者已在上一步退出，本分支只对
+    // 僵尸文件/异例（非 proxy 进程占路径）触发——exit_socket_owned 保留作防御。
+    let ctl_listener = match TokioUnixListener::bind(socket_path) {
+        Ok(l) => l,
+        Err(e) if is_bind_conflict(&e) => {
+            // 冲突 = 路径被占用：活 proxy → 报错退出（不删其控制通道）；
+            // 探测无应答（僵尸 socket）→ 删除后重绑一次。
+            if check_proxy_running(socket_path) {
+                exit_socket_owned(socket_path);
+            }
+            let _ = std::fs::remove_file(socket_path);
+            match TokioUnixListener::bind(socket_path) {
+                Ok(l) => l,
+                Err(e2) if is_bind_conflict(&e2) => {
+                    // 重绑仍冲突 → 并发竞态加剧 → 重新探测，耗尽报错（保证收敛）。
+                    for _ in 0..PROBE_RETRIES {
+                        if check_proxy_running(socket_path) {
+                            exit_socket_owned(socket_path);
+                        }
+                        std::thread::sleep(PROBE_TIMEOUT);
+                    }
+                    exit_bind_failed(socket_path, &e2);
+                }
+                Err(e2) => exit_bind_failed(socket_path, &e2),
+            }
+        }
+        Err(e) => exit_bind_failed(socket_path, &e),
+    };
     log_proxy!("control socket bound");
 
     let ctl_state = state.clone();
-    let ctl_path = socket_path.to_path_buf();
+    // 阴影为 owned PathBuf：tokio::spawn 要求 'static（借用 &Path 不能进闭包）。
+    let socket_path = socket_path.to_path_buf();
     tokio::spawn(async move {
-        run_control_socket(ctl_listener, ctl_state).await;
-        let _ = std::fs::remove_file(&ctl_path);
+        // run_control_socket 永不返回（唯一出口是 shutdown 分支的 process::exit，
+        // 那里已自行删 socket 文件）——await 后无需清理。
+        run_control_socket(ctl_listener, ctl_state, socket_path).await;
     });
-
-    let addr = format!("127.0.0.1:{port}");
-    let listener = TcpListener::bind(&addr)
-        .await
-        .unwrap_or_else(|e| panic!("proxy bind {addr}: {e}"));
 
     loop {
         let (stream, _peer) = match listener.accept().await {
@@ -239,9 +335,9 @@ async fn handle_request(
         .unwrap_or("/")
         .to_string();
 
-    log_proxy!("<< {method} {path_and_query}");
+    log_proxy!("<< {method} {}", mask_request_path(&path_and_query));
 
-    if req.uri().path().is_empty() || !req.uri().path().starts_with("/v1") {
+    if !req.uri().path().starts_with("/v1") {
         log_proxy!(">> 404 (path not /v1)");
         return Ok(plain_response(
             StatusCode::NOT_FOUND,
@@ -272,7 +368,8 @@ async fn handle_request(
     );
 
     log_proxy!(
-        "-> upstream {method} {upstream_url} (model={})",
+        "-> upstream {method} {} (model={})",
+        mask_request_path(&upstream_url),
         active.model
     );
 
@@ -341,7 +438,9 @@ async fn handle_request(
             Ok(resp.body(body).expect("build proxy response"))
         }
         Err(e) => {
-            log_proxy!("<< upstream error: {e}");
+            // reqwest errors embed the full request URL (with query) — the log
+            // path must run the same sk- value scan as the inbound/outbound lines.
+            log_proxy!("<< upstream error: {}", mask_request_path(&format!("{e}")));
             Ok(plain_response(
                 StatusCode::BAD_GATEWAY,
                 format!("cct proxy — upstream unreachable: {e}\n"),
@@ -366,37 +465,75 @@ fn plain_response(status: StatusCode, body: impl Into<String>) -> Response<Proxy
         .expect("build error response")
 }
 
+// ── port diagnostics (read-only lsof) ─────────────────────────────────────
+
+/// Read-only diagnosis: PID listening on `port` via lsof. Returns None when
+/// lsof is unavailable or nothing is listening (caller falls back to advice text).
+pub fn tcp_port_owner(port: u16) -> Option<String> {
+    let out = std::process::Command::new("lsof")
+        .arg(format!("-tiTCP:{port}"))
+        .arg("-sTCP:LISTEN")
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8(out.stdout)
+        .ok()?
+        .lines()
+        .next()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Port-conflict error message for report-only display. Never kills anything.
+pub fn port_conflict_message(port: u16) -> String {
+    match tcp_port_owner(port) {
+        Some(pid) => format!(
+            "port {port} already in use by PID {pid} (lsof -tiTCP:{port} -sTCP:LISTEN). \
+             若为旧版本遗留实例或第三方进程, 手动终止后重试; cct 不会自动终止进程."
+        ),
+        None => format!("port {port} already in use. 运行 `lsof -iTCP:{port}` 查看占用者."),
+    }
+}
+
 // ── unix-socket control handler ───────────────────────────────────────────
 
-async fn run_control_socket(listener: UnixListener, state: Arc<ProxyState>) {
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
-                let st = state.clone();
-                tokio::task::spawn_blocking(move || handle_control(stream, st));
+async fn run_control_socket(
+    listener: TokioUnixListener,
+    state: Arc<ProxyState>,
+    socket_path: PathBuf,
+) {
+    loop {
+        match listener.accept().await {
+            Ok((stream, _peer)) => {
+                let ctl_state = state.clone();
+                let std_stream = match stream.into_std() {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("[cct-proxy] control stream into_std error: {e}");
+                        continue;
+                    }
+                };
+                let socket_path = socket_path.clone();
+                tokio::task::spawn_blocking(move || {
+                    handle_control(std_stream, ctl_state, socket_path)
+                });
             }
             Err(e) => {
                 eprintln!("[cct-proxy] control socket accept error: {e}");
-                break;
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         }
     }
 }
 
-fn handle_control(mut stream: UnixStream, state: Arc<ProxyState>) {
+fn handle_control(mut stream: UnixStream, state: Arc<ProxyState>, socket_path: PathBuf) {
     let mut reader = BufReader::new(&stream);
     let mut line = String::new();
     if reader.read_line(&mut line).is_err() || line.trim().is_empty() {
         log_proxy!("ctl << empty command");
-        let _ = write_control_response(
-            &mut stream,
-            &ControlResponse {
-                status: "err".into(),
-                message: Some("empty command".into()),
-                base_url: None,
-                model: None,
-            },
-        );
+        let _ = write_control_response(&mut stream, &error_response("empty command"));
         return;
     }
 
@@ -404,20 +541,16 @@ fn handle_control(mut stream: UnixStream, state: Arc<ProxyState>) {
         Ok(c) => c,
         Err(e) => {
             log_proxy!("ctl << invalid JSON: {e}");
-            let _ = write_control_response(
-                &mut stream,
-                &ControlResponse {
-                    status: "err".into(),
-                    message: Some(format!("invalid JSON: {e}")),
-                    base_url: None,
-                    model: None,
-                },
-            );
+            let _ =
+                write_control_response(&mut stream, &error_response(format!("invalid JSON: {e}")));
             return;
         }
     };
 
-    log_proxy!("ctl << {}", line.trim());
+    log_proxy!(
+        "ctl << {}",
+        mask_ctl_line(line.trim(), cmd.api_key.as_deref())
+    );
 
     match cmd.cmd.as_str() {
         "switch" => {
@@ -477,20 +610,54 @@ fn handle_control(mut stream: UnixStream, state: Arc<ProxyState>) {
                     model: None,
                 },
             );
+            // Unix socket 文件不会随进程退出自动删除，process::exit 又跳过析构：
+            // exit 前必须显式清理，否则每次 stop 留下死 socket 文件（约束 #6 稳态缺陷）。
+            let _ = std::fs::remove_file(&socket_path);
             std::process::exit(0);
         }
         other => {
             log_proxy!("ctl >> err (unknown command: {other})");
             let _ = write_control_response(
                 &mut stream,
-                &ControlResponse {
-                    status: "err".into(),
-                    message: Some(format!("unknown command: {other}")),
-                    base_url: None,
-                    model: None,
-                },
+                &error_response(format!("unknown command: {other}")),
             );
         }
+    }
+}
+
+/// Redact the api_key field value from a control-command JSON line.
+/// Field-name based（约束 #7）：任何 api_key 值均掩码，不依赖 sk- 前缀。
+fn mask_ctl_line(line: &str, api_key: Option<&str>) -> String {
+    match api_key {
+        Some(key) if !key.is_empty() => line.replace(key, "***"),
+        _ => line.to_string(),
+    }
+}
+
+/// Redact sk-... secret values from a request path/query log line
+///（请求日志无字段名可依，值前缀扫描兜底）。
+fn mask_request_path(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some((before, after)) = rest.split_once("sk-") {
+        out.push_str(before);
+        out.push_str("sk-***");
+        let token_end = after
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+            .unwrap_or(after.len());
+        rest = &after[token_end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Build an error ControlResponse carrying `message`.
+fn error_response(message: impl Into<String>) -> ControlResponse {
+    ControlResponse {
+        status: "err".into(),
+        message: Some(message.into()),
+        base_url: None,
+        model: None,
     }
 }
 
@@ -507,6 +674,8 @@ fn write_control_response(stream: &mut UnixStream, resp: &ControlResponse) -> io
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
+    use std::os::unix::net::UnixListener;
 
     #[test]
     fn control_command_parse_switch() {
@@ -569,5 +738,290 @@ mod tests {
     fn proxy_socket_path_ends_with_proxy_sock() {
         let path = proxy_socket_path();
         assert!(path.ends_with("proxy.sock"), "got: {path:?}");
+    }
+
+    #[test]
+    fn proxy_socket_path_override() {
+        let temp = std::env::temp_dir().join("cct-proxy-test.proxy.sock");
+        std::env::set_var("CCT_PROXY_SOCKET", &temp);
+        assert_eq!(proxy_socket_path(), temp);
+        std::env::remove_var("CCT_PROXY_SOCKET");
+        let restored = proxy_socket_path();
+        assert!(restored.ends_with("proxy.sock"), "got: {restored:?}");
+    }
+
+    fn test_socket(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("cct-proxy-{name}.sock"))
+    }
+
+    /// A socket path guaranteed not to exist: a stale socket left behind by a
+    /// crashed run would make the "absent" tests false-negative.
+    fn fresh_test_socket(name: &str) -> std::path::PathBuf {
+        let path = test_socket(name);
+        let _ = std::fs::remove_file(&path);
+        path
+    }
+
+    #[test]
+    fn check_proxy_running_false_when_socket_absent() {
+        let path = fresh_test_socket("check-proxy-running-absent");
+        assert!(
+            !check_proxy_running(&path),
+            "absent socket must not be reported as running"
+        );
+    }
+
+    #[test]
+    fn check_proxy_running_true_when_daemon_responds() {
+        // A live daemon answers the app-level `status` probe with a
+        // ControlResponse within the probe timeout.
+        let path = fresh_test_socket("check-proxy-running-responds");
+        let listener = UnixListener::bind(&path).expect("bind test control socket");
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _peer) = listener.accept().expect("accept probe connection");
+            let mut reader = BufReader::new(&stream);
+            let mut line = String::new();
+            reader.read_line(&mut line).expect("read probe command");
+            assert!(
+                !line.trim().is_empty(),
+                "app-level probe must send a control command, got EOF"
+            );
+            let cmd: ControlCommand =
+                serde_json::from_str(line.trim()).expect("parse probe command JSON");
+            assert_eq!(
+                cmd.cmd, "status",
+                "probe must send a status command, got: {line}"
+            );
+            write_control_response(
+                &mut stream,
+                &ControlResponse {
+                    status: "ok".into(),
+                    message: None,
+                    base_url: None,
+                    model: None,
+                },
+            )
+            .expect("write control response");
+        });
+        assert!(
+            check_proxy_running(&path),
+            "responding daemon must be reported as running"
+        );
+        handle.join().expect("responder thread panicked");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn check_proxy_running_false_when_socket_silent() {
+        // A dead proxy accepts the connection but never answers: the app-level
+        // probe must give up within a bounded time, not hang forever.
+        let path = fresh_test_socket("check-proxy-running-silent");
+        let listener = UnixListener::bind(&path).expect("bind test control socket");
+        let handle = std::thread::spawn(move || {
+            let (_stream, _peer) = listener.accept().expect("accept probe connection");
+            // Hold the connection open without responding.
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        });
+        let started = std::time::Instant::now();
+        assert!(
+            !check_proxy_running(&path),
+            "silent socket must not be reported as running"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "probe must return in bounded time, took {:?}",
+            started.elapsed()
+        );
+        handle.join().expect("silent listener thread panicked");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ── shutdown 2s 超时（Step 9：约束 #1/#10——无响应 proxy 不得挂起、不得吞错）──────
+
+    /// 无响应 socket（accept 后 hold 住不回包）→ shutdown_proxy 必须在 STOP_TIMEOUT
+    /// 量级内返回 Err。错误必须传播：旧实现 `let _ = send_control(...)` 吞错返回 Ok。
+    #[test]
+    fn shutdown_proxy_errs_on_unresponsive_socket() {
+        let path = fresh_test_socket("shutdown-proxy-silent");
+        let listener = UnixListener::bind(&path).expect("bind test control socket");
+        let handle = std::thread::spawn(move || {
+            let (_stream, _peer) = listener.accept().expect("accept shutdown connection");
+            // Hold the connection open without responding (hung/dead proxy).
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        });
+        let started = std::time::Instant::now();
+        let result = shutdown_proxy(&path);
+        assert!(
+            result.is_err(),
+            "shutdown on silent socket must return Err, got: {result:?}"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(3),
+            "shutdown must return in bounded time, took {:?}",
+            started.elapsed()
+        );
+        handle.join().expect("silent listener thread panicked");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// 正常应答 `{"status":"ok"}` 的 socket → shutdown_proxy 返回 Ok。
+    #[test]
+    fn shutdown_proxy_ok_when_daemon_responds() {
+        let path = fresh_test_socket("shutdown-proxy-responds");
+        let listener = UnixListener::bind(&path).expect("bind test control socket");
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _peer) = listener.accept().expect("accept shutdown connection");
+            let mut reader = BufReader::new(&stream);
+            let mut line = String::new();
+            reader.read_line(&mut line).expect("read shutdown command");
+            let cmd: ControlCommand =
+                serde_json::from_str(line.trim()).expect("parse shutdown command JSON");
+            assert_eq!(
+                cmd.cmd, "shutdown",
+                "expected shutdown command, got: {line}"
+            );
+            write_control_response(
+                &mut stream,
+                &ControlResponse {
+                    status: "ok".into(),
+                    message: Some("shutting down".into()),
+                    base_url: None,
+                    model: None,
+                },
+            )
+            .expect("write control response");
+        });
+        let result = shutdown_proxy(&path);
+        assert!(
+            result.is_ok(),
+            "shutdown with ok response must succeed, got: {result:?}"
+        );
+        handle.join().expect("responder thread panicked");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ── 占端口诊断（Step 5：只读 lsof + 降级文本，约束 #4）──────────────
+
+    /// lsof 缺失（PATH 不含 lsof）→ tcp_port_owner 返回 None，
+    /// port_conflict_message 降级为定位命令建议文本（含 "lsof -iTCP"）。
+    #[test]
+    #[serial]
+    fn tcp_port_owner_fallback_when_lsof_missing() {
+        std::env::set_var("PATH", "/nonexistent");
+        let owner = tcp_port_owner(19191);
+        std::env::remove_var("PATH");
+        assert!(
+            owner.is_none(),
+            "tcp_port_owner must return None when lsof is not on PATH, got: {owner:?}"
+        );
+        let msg = port_conflict_message(19191);
+        assert!(
+            msg.contains("lsof -iTCP"),
+            "degraded message must suggest the locating command, got: {msg}"
+        );
+    }
+
+    /// lsof 可用且端口有 LISTEN 占用者 → 返回 PID，消息含 "PID"。
+    /// 环境敏感（CI 可能无 lsof）：无 lsof 时跳过，缺失场景由上一测试覆盖。
+    #[test]
+    #[serial]
+    fn tcp_port_owner_reports_pid_when_lsof_available() {
+        if std::process::Command::new("lsof")
+            .arg("-v")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind test port");
+        let port = listener.local_addr().expect("test port").port();
+        let owner = tcp_port_owner(port);
+        assert!(
+            owner.is_some(),
+            "lsof present + listener on port {port} must yield a PID"
+        );
+        let msg = port_conflict_message(port);
+        assert!(
+            msg.contains("PID"),
+            "owner message must include PID, got: {msg}"
+        );
+    }
+
+    // ── 控制命令与请求日志脱敏（Step 8：约束 #7，mask-secrets-on-every-display-path）──────
+
+    /// api_key 为 sk- 前缀形态：按字段名脱敏，行内所有出现掩码为 ***。
+    #[test]
+    fn mask_ctl_line_masks_sk_prefix_api_key() {
+        let line =
+            r#"{"cmd":"switch","base_url":"https://api.example.com/v1","api_key":"sk-abc123"}"#;
+        let masked = mask_ctl_line(line, Some("sk-abc123"));
+        assert!(
+            !masked.contains("sk-abc123"),
+            "plaintext api_key must be gone, got: {masked}"
+        );
+        assert!(
+            masked.contains("\"api_key\":\"***\""),
+            "api_key field value must be masked, got: {masked}"
+        );
+    }
+
+    /// api_key 无 sk- 前缀（自定义 token 形态）：同样按字段名脱敏为 ***，
+    /// 不依赖值形态——这是按字段名脱敏的核心断言。
+    #[test]
+    fn mask_ctl_line_masks_custom_token_api_key() {
+        let line = r#"{"cmd":"switch","base_url":"https://api.example.com/v1","api_key":"custom-token-xyz"}"#;
+        let masked = mask_ctl_line(line, Some("custom-token-xyz"));
+        assert!(
+            !masked.contains("custom-token-xyz"),
+            "plaintext custom token must be gone, got: {masked}"
+        );
+        assert!(
+            masked.contains("\"api_key\":\"***\""),
+            "custom token api_key field value must be masked, got: {masked}"
+        );
+    }
+
+    /// 无 api_key（如 status 命令）：原样返回。
+    #[test]
+    fn mask_ctl_line_no_key_passthrough() {
+        let line = r#"{"cmd":"status"}"#;
+        assert_eq!(mask_ctl_line(line, None), line);
+    }
+
+    /// 请求路径含 ?key=sk-xyz：sk- 值掩码为 sk-***，无明文。
+    #[test]
+    fn mask_request_path_masks_query_key() {
+        let path = "/v1/messages?key=sk-xyz";
+        let masked = mask_request_path(path);
+        assert!(
+            masked.contains("sk-***"),
+            "sk- value must be masked, got: {masked}"
+        );
+        assert!(
+            !masked.contains("sk-xyz"),
+            "plaintext sk- value must be gone, got: {masked}"
+        );
+    }
+
+    /// sk- 值含 -/_ 分隔字符（如 sk-ab_c-d）：整体掩码。
+    #[test]
+    fn mask_request_path_masks_key_with_separators() {
+        let path = "/v1/messages?key=sk-ab_c-d";
+        let masked = mask_request_path(path);
+        assert!(
+            masked.contains("sk-***"),
+            "sk- value must be masked, got: {masked}"
+        );
+        assert!(
+            !masked.contains("sk-ab_c-d"),
+            "plaintext sk- value must be gone, got: {masked}"
+        );
+    }
+
+    /// 非 sk- 内容原样保留。
+    #[test]
+    fn mask_request_path_preserves_non_secret() {
+        let path = "/v1/messages?model=gpt-4";
+        assert_eq!(mask_request_path(path), path);
     }
 }

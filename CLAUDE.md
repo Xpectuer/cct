@@ -53,7 +53,7 @@ The app is five focused modules with no shared mutable state:
 | `config` | `src/config.rs` | Deserialize `profiles.toml`; `Backend` enum; `validate_profiles`; write default config; append/update profiles with backend-specific env generation; `toggle_skip_permissions`, `toggle_auth_type`, `toggle_full_auto` via toml_edit |
 | `app` | `src/app.rs` | Cursor state, `active_backend`, `filtered_indices()`, `switch_backend()`, `AppMode` (Normal/AddForm), `FormState` with `to_new_profile()` as single source of truth |
 | `ui` | `src/ui.rs` | ratatui rendering — tab bar + 35/65 split filtered list+detail panel + footer; backend-aware `build_form_lines`; masks sensitive env vars |
-| `launch` | `src/launch.rs` | `build_launch_command` dispatch; `exec_claude`/`exec_codex`; `generate_codex_config`; `exec()` process replace; open `$EDITOR`; check/install claude binary |
+| `launch` | `src/launch.rs` | `build_launch_command` dispatch; `exec_claude`/`exec_codex`; `build_codex_proxy_config_args`; `exec()` process replace; open `$EDITOR`; check/install claude binary |
 | `cli` | `src/cli.rs` | `cct add` interactive CLI flow — 5 prompts, `--auth-type` flag, masked summary, duplicate guard (Claude profiles only) |
 
 **Data flow:** `main` checks backend binaries → loads + validates profiles → creates `App` → draw loop → on Enter dispatches to `launch::exec_claude` or `launch::exec_codex` based on `profile.backend`.
@@ -63,7 +63,7 @@ The app is five focused modules with no shared mutable state:
 - `ui::mask_value` redacts any env key containing `TOKEN`, `KEY`, or `SECRET`.
 - Config hot-reload on `e`: editor opens, then profiles are re-parsed in-place without restart.
 - `FormState::to_new_profile()` is the single source of truth for form-field-index → semantic mapping per backend.
-- Codex launch: `generate_codex_config` writes `~/.config/cct-tui/codex/config.toml` from profile fields; `CODEX_HOME` is set before exec.
+- Codex launch: `CODEX_HOME` is never set — all profiles share the default `~/.codex` history/sessions; proxy mode (API key) injects the custom provider via 6 inline `--config` flags (`build_codex_proxy_config_args`) instead of writing `config.toml`, and subscription mode (OAuth) passes `--config model_provider=openai`.
 - `s` key toggles `skip_permissions` on the selected Claude profile; `t` key toggles `auth_type` between `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN`; `d` key duplicates the selected profile (appends `_copy` to name, opens pre-filled add form); all persisted via `toml_edit` to preserve comments.
 - On startup, if `claude` is missing, `prompt_install()` offers to run the official installer before entering raw mode.
 
@@ -118,7 +118,7 @@ Detailed module docs are in `docs/modules/`:
 - [config](docs/modules/config.md) — TOML deserialization, Backend enum, validate_profiles, config path, default bootstrap, toggle_skip_permissions
 - [app](docs/modules/app.md) — cursor state, backend-filtered navigation, FormState.to_new_profile (single source of truth)
 - [ui](docs/modules/ui.md) — ratatui rendering, tab bar, backend-aware form labels, sensitive-value masking
-- [launch](docs/modules/launch.md) — arg building, exec-replace for Claude and Codex, generate_codex_config, editor open, autoinstall check
+- [launch](docs/modules/launch.md) — arg building, exec-replace for Claude and Codex, inline `--config` flags, editor open, autoinstall check
 - [cli](docs/modules/cli.md) — cct add interactive CLI flow, 5 prompts, masked summary, duplicate guard
 
 Rules:
@@ -142,11 +142,13 @@ Lessons:
 - [cct env can inject env vars into happy daemon](docs/lessons/happy-daemon-env-injection-via-cct.md) — use `cct env <profile> -- happy daemon start` to seed daemon sessions with profile env
 - [install.sh 404 network issue](docs/lessons/install-script-404-network-issue.md) — HTTP 404 from GitHub API can mean connectivity failure, not missing releases
 - [GitLab Runner SSH cloning on self-hosted](docs/lessons/gitlab-runner-ssh-cloning-self-hosted.md) — helper image uses apk not apt-get; volume-mounted .ssh has wrong ownership; tagged runners ignore untagged jobs
+- [Stale daemon undermines fix verification](docs/lessons/stale-daemon-undermines-fix-verification.md) — probe coverage must equal the fault surface; verify the running instance is the fixed binary
+- [Proxy base URL must not carry /v1](docs/lessons/proxy-base-url-no-version-prefix.md) — forwarding concatenates base_url + client path; OpenAI-compatible clients already send /v1 in the path
 
 References:
 - [install-script reference](docs/references/install-script.md) — curl|bash installer functions and test coverage
 - [Codex backend development guide](docs/references/codex-backend-development-guide.md) — config schema, validation, UI behavior, launch flow, and full_auto toggling
-- [Codex CODEX_HOME storage layout](docs/references/codex-home-storage-layout.md) — per-profile Codex state files and sqlite schema observations
+- [Codex CODEX_HOME storage layout](docs/references/codex-home-storage-layout.md) — shared `~/.codex` state (all profiles) and sqlite schema observations
 - [Context snapshot index](docs/references/index.md) — session context snapshots and cross-references
 
 Quality:
