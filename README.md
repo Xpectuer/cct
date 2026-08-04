@@ -20,7 +20,7 @@ A terminal UI for managing and launching [Claude Code](https://claude.ai/code) a
 - **skip_permissions / full_auto toggle** — press `s` to toggle `--dangerously-skip-permissions` on Claude profiles or `--full-auto` on Codex profiles; the change is persisted immediately to `profiles.toml`
 - **Auth type toggle** — press `t` to switch between `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` on Claude profiles; persisted immediately. Use `cct add --auth-type token` to create token-auth profiles from the CLI
 - **One-shot continue** — press `c` to launch the selected Claude profile with `--continue`, resuming the last conversation in a single turn
-- **Autoinstall** — if `claude` is not found in PATH on startup, `cct` offers to install it via `curl -fsSL https://claude.ai/install.sh | bash`
+- **Autoinstall** — if `claude` is not found in PATH, the TUI offers to install it via `curl -fsSL https://claude.ai/install.sh | bash`, and `cct run` installs it automatically (agent-friendly: no prompts, first run just works)
 - **Zero overhead** — `exec()` replaces the process; no parent lingers
 
 ## Subcommands
@@ -28,7 +28,7 @@ A terminal UI for managing and launching [Claude Code](https://claude.ai/code) a
 | Command | Action |
 |---------|--------|
 | `cct` (no args) | Launch the TUI |
-| `cct add` | Add a new profile interactively. `--auth-type token` writes `ANTHROPIC_AUTH_TOKEN` instead of `ANTHROPIC_API_KEY`; `--backend codex` selects the backend (default `claude`) |
+| `cct add` | Add a new profile. Interactive prompts by default; with `--name` (plus optional `--description`, `--base-url`, `--api-key`, `--model`, `--fast-model`) it writes the profile directly with no prompts — agent-friendly. `--auth-type token` writes `ANTHROPIC_AUTH_TOKEN` instead of `ANTHROPIC_API_KEY`; `--backend codex` selects the backend (default `claude`) |
 | `cct edit` | Open `profiles.toml` in `$EDITOR` (or `vi`) |
 | `cct run [name]` | Launch a profile by name (case-insensitive). Without a name, shows an interactive numbered picker |
 | `cct env` | List all profiles (non-interactive) |
@@ -65,7 +65,8 @@ Requires Rust 1.70+ and a Unix-like OS (uses `exec`).
 
    **Option A — TUI form**: Run `cct`, then press `a` to open the inline add form. Use `Tab` to switch between the Claude/Codex tabs to choose which backend the new profile uses. Fill in the fields and confirm.
 
-   **Option B — CLI**: Run `cct add` and answer the prompts (Claude backend by default; pass `--backend codex` to choose another).
+   **Option B — CLI**: Run `cct add` and answer the prompts (Claude backend by default; pass `--backend codex` to choose another). For scripts and agents, skip the prompts entirely:
+   `cct add --name my-profile --base-url https://api.example.com/v1 --api-key sk-... --model MiniMax-M2.1`
 
    **Option C — Manual edit**: Run `cct edit` to open the config in your editor, or edit the file directly:
 

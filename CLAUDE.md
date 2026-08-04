@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Agent Installation
 
-See [INSTALL.md](INSTALL.md) for automated cct installation instructions (curl|bash, cargo, manual download).
+See [INSTALL.md](INSTALL.md) for automated cct installation instructions (curl|bash, cargo, manual download). For AI coding agents, [INSTALL_PROMPT.md](INSTALL_PROMPT.md) contains a self-contained copy-paste install prompt.
 
 ## Project Overview
 
@@ -54,7 +54,7 @@ The app is five focused modules with no shared mutable state:
 | `app` | `src/app.rs` | Cursor state, `active_backend`, `filtered_indices()`, `switch_backend()`, `AppMode` (Normal/AddForm), `FormState` with `to_new_profile()` as single source of truth |
 | `ui` | `src/ui.rs` | ratatui rendering — tab bar + 35/65 split filtered list+detail panel + footer; backend-aware `build_form_lines`; masks sensitive env vars |
 | `launch` | `src/launch.rs` | `build_launch_command` dispatch; `exec_claude`/`exec_codex`; `build_codex_proxy_config_args`; `exec()` process replace; open `$EDITOR`; check/install claude binary |
-| `cli` | `src/cli.rs` | `cct add` interactive CLI flow — 5 prompts, `--auth-type` flag, masked summary, duplicate guard (Claude profiles only) |
+| `cli` | `src/cli.rs` | `cct add` interactive CLI flow — 5 prompts, `--auth-type` flag, masked summary, duplicate guard (Claude profiles only), non-interactive `--name` flag mode for agents/scripts |
 
 **Data flow:** `main` checks backend binaries → loads + validates profiles → creates `App` → draw loop → on Enter dispatches to `launch::exec_claude` or `launch::exec_codex` based on `profile.backend`.
 
@@ -65,7 +65,7 @@ The app is five focused modules with no shared mutable state:
 - `FormState::to_new_profile()` is the single source of truth for form-field-index → semantic mapping per backend.
 - Codex launch: `CODEX_HOME` is never set — all profiles share the default `~/.codex` history/sessions; proxy mode (API key) injects the custom provider via 6 inline `--config` flags (`build_codex_proxy_config_args`) instead of writing `config.toml`, and subscription mode (OAuth) passes `--config model_provider=openai`.
 - `s` key toggles `skip_permissions` on the selected Claude profile; `t` key toggles `auth_type` between `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN`; `d` key duplicates the selected profile (appends `_copy` to name, opens pre-filled add form); all persisted via `toml_edit` to preserve comments.
-- On startup, if `claude` is missing, `prompt_install()` offers to run the official installer before entering raw mode.
+- On TUI startup, if `claude` is missing, `prompt_install()` offers to run the official installer before entering raw mode; `cct run` auto-installs non-interactively (`install_claude()`) so agents and scripts work on first run.
 
 ## Config File Format
 
@@ -93,7 +93,7 @@ API_TIMEOUT_MS = "600000"
 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
 ```
 
-**Profile add flow** (`cct add` or press `a` in TUI): prompts for 5 fields — Name (required), Description, Base URL, API Key, Model. Supports `--auth-type token` flag to write `ANTHROPIC_AUTH_TOKEN` instead of `ANTHROPIC_API_KEY`. When any env-bearing field is non-empty, a `[profiles.env]` block is automatically written. The `model` field populates 5 model alias env vars plus `API_TIMEOUT_MS` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`.
+**Profile add flow** (`cct add` or press `a` in TUI): prompts for 5 fields — Name (required), Description, Base URL, API Key, Model. Supports `--auth-type token` flag to write `ANTHROPIC_AUTH_TOKEN` instead of `ANTHROPIC_API_KEY`. For agents/scripts, `cct add --name <n> [--description ... --base-url ... --api-key ... --model ... --fast-model ...]` skips all prompts and writes the profile directly. When any env-bearing field is non-empty, a `[profiles.env]` block is automatically written. The `model` field populates 5 model alias env vars plus `API_TIMEOUT_MS` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`.
 
 ## Docs Directory
 

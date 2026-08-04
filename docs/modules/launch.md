@@ -86,8 +86,13 @@ updated: 2026-08-02
   - Must be called **before** `enable_raw_mode` / `EnterAlternateScreen`.
   - Prints `"Claude CLI not found in PATH."` and prompts `"Install now? [Y/n]"`.
   - If user answers `"n"` or `"no"`: prints manual install instructions and calls `std::process::exit(0)`.
-  - Otherwise: runs `curl -fsSL https://claude.ai/install.sh | bash`.
+  - Otherwise: delegates to `install_claude`.
   - Returns `Err` if the installer exits non-zero or if `claude` is still not found after install.
+
+- `pub fn install_claude() -> Result<()>`
+  - Non-interactive install used by `cct run` so agents and scripts can bootstrap Claude Code on first use instead of hitting a bare "not found" exec error.
+  - Runs `curl -fsSL https://claude.ai/install.sh | bash`, then re-checks `check_claude_installed`, falling back to `~/.local/bin/claude` existing on disk.
+  - Returns `Err` with the manual install command in the message if the installer fails or `claude` is still not found.
 
 - `pub fn open_editor(path: &Path) -> Result<()>`
   - Reads `$EDITOR`; falls back to `"vi"` if unset or empty.

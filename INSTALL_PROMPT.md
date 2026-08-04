@@ -43,6 +43,13 @@ You are an AI coding agent. Install `cct` (a terminal UI launcher for Claude Cod
 
 5. **Report back.** Tell the user which method you used and where the binary was installed.
 
+6. **Optional — create and launch a profile non-interactively** (everything above works headlessly):
+   ```bash
+   cct add --name my-profile --base-url https://api.example.com/v1 --api-key sk-... --model mini
+   cct run my-profile
+   ```
+   `cct add --name ...` skips all prompts; `cct run` auto-installs Claude Code on first use if it is missing.
+
 Notes:
 - Installs to `~/.local/bin/cct` (curl|bash) or `~/.cargo/bin/cct` (cargo). No root or sudo required.
 - On first run, `cct` generates a default config at `~/Library/Application Support/cc-tui/profiles.toml` (macOS) or `~/.config/cc-tui/profiles.toml` (Linux).

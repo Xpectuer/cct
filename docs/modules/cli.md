@@ -9,7 +9,7 @@ updated: 2026-07-17
 
 # cli Module Documentation
 
-> **Purpose**: Implements the `cct add` and `cct edit` subcommands. `cct add` runs an interactive 6-prompt CLI flow that collects profile fields, shows a masked summary, and calls `config::append_profile` on user confirmation; `--backend claude|codex` selects the target backend (default claude). `cct edit` directly opens `profiles.toml` in `$EDITOR` (dispatched from `main.rs` via `launch::open_editor`).
+> **Purpose**: Implements the `cct add` and `cct edit` subcommands. `cct add` runs an interactive 6-prompt CLI flow that collects profile fields, shows a masked summary, and calls `config::append_profile` on user confirmation; `--backend claude|codex` selects the target backend (default claude). When `--name` is provided, `cct add` skips all prompts and confirmations and writes the profile directly from flags — the agent/script-friendly non-interactive mode. `cct edit` directly opens `profiles.toml` in `$EDITOR` (dispatched from `main.rs` via `launch::open_editor`).
 > **Path**: src/cli.rs (add); main.rs — `Some(Commands::Edit)` arm (edit)
 
 ---
@@ -19,11 +19,13 @@ updated: 2026-07-17
 
 ### Exported Functions
 
-- `pub fn run_add(auth_type: Option<String>, backend: Option<String>) -> Result<()>`
-  - Entry point for the `cct add` subcommand; called from `main` when `Commands::Add { auth_type, backend }` is matched.
+- `pub fn run_add(auth_type: Option<String>, backend: Option<String>, name: Option<String>, description: Option<String>, base_url: Option<String>, api_key: Option<String>, model: Option<String>, fast_model: Option<String>) -> Result<()>`
+  - Entry point for the `cct add` subcommand; called from `main` when `Commands::Add { .. }` is matched.
   - Accepts `--auth-type token` flag to use `ANTHROPIC_AUTH_TOKEN` instead of `ANTHROPIC_API_KEY`.
   - Accepts `--backend claude|codex` flag (case-insensitive, default claude) via `resolve_backend`.
-  - Delegates to `run_add_with(io::stdin().lock(), io::stdout(), auth_type, backend)`.
+  - **Two modes:**
+    - `--name` given → non-interactive: trims the name, rejects empty/duplicate names with an error, builds `NewProfile` from the remaining flags (`--description`, `--base-url`, `--api-key`, `--model`, `--fast-model`, all optional → `None` when absent), calls `config::append_profile`, prints `"Profile '<name>' added."`. No prompts, no confirmation — safe for agents and scripts.
+    - `--name` omitted → delegates to `run_add_with(io::stdin().lock(), io::stdout(), auth_type, backend)` (full interactive flow).
   - Returns: `anyhow::Result<()>`.
 
 - `pub fn run_add_with<R: BufRead, W: Write>(reader: R, writer: W, auth_type: Option<String>, backend: config::Backend) -> Result<()>`
@@ -114,7 +116,8 @@ The only persistent side effect is the file write performed by `config::append_p
 ```rust
 // In main.rs — routing for CLI subcommands:
 match args.command {
-    Some(Commands::Add { auth_type, backend }) => cli::run_add(auth_type, backend),
+    Some(Commands::Add { auth_type, backend, name, description, base_url, api_key, model, fast_model }) =>
+        cli::run_add(auth_type, backend, name, description, base_url, api_key, model, fast_model),
     Some(Commands::Edit) => launch::open_editor(&config::config_path()),
     None => run_tui(),
 }

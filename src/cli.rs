@@ -26,9 +26,45 @@ fn resolve_backend(backend: Option<String>) -> Result<config::Backend> {
     }
 }
 
-pub fn run_add(auth_type: Option<String>, backend: Option<String>) -> Result<()> {
+// One flat option per CLI flag — a struct would just relocate the fields.
+#[allow(clippy::too_many_arguments)]
+pub fn run_add(
+    auth_type: Option<String>,
+    backend: Option<String>,
+    name: Option<String>,
+    description: Option<String>,
+    base_url: Option<String>,
+    api_key: Option<String>,
+    model: Option<String>,
+    fast_model: Option<String>,
+) -> Result<()> {
     let backend = resolve_backend(backend)?;
-    run_add_with(io::stdin().lock(), io::stdout(), auth_type, backend)
+    // Non-interactive mode: agents and scripts provide --name (and optionally
+    // the other fields) and get no prompts or confirmations.
+    let Some(name) = name else {
+        return run_add_with(io::stdin().lock(), io::stdout(), auth_type, backend);
+    };
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        anyhow::bail!("Error: --name must not be empty.");
+    }
+    if config::profile_name_exists(&name)? {
+        anyhow::bail!("Error: profile '{}' already exists.", name);
+    }
+    let profile = NewProfile {
+        name: name.clone(),
+        description,
+        base_url,
+        api_key,
+        model,
+        fast_model,
+        backend,
+        full_auto: None,
+        auth_type,
+    };
+    config::append_profile(&profile)?;
+    println!("Profile '{}' added.", name);
+    Ok(())
 }
 
 pub fn run_add_with<R: BufRead, W: Write>(
@@ -256,6 +292,77 @@ mod tests {
         assert!(content.contains("[profiles.env]"));
         assert!(content.contains("ANTHROPIC_BASE_URL"));
         assert!(content.contains("ANTHROPIC_MODEL = \"MiniMax-M2.1\""));
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn run_add_flags_skips_prompts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, "[[profiles]]\nname = \"existing\"\n").unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        // All fields via flags — no stdin involved, no confirmation
+        run_add(
+            None,
+            Some("claude".into()),
+            Some("flag-profile".into()),
+            Some("from flags".into()),
+            Some("https://api.example.com".into()),
+            Some("sk-flag".into()),
+            Some("MiniMax-M2.1".into()),
+            None,
+        )
+        .unwrap();
+
+        let profiles = config::load_profiles().unwrap();
+        let p = profiles.iter().find(|p| p.name == "flag-profile").unwrap();
+        assert_eq!(p.description.as_deref(), Some("from flags"));
+        assert_eq!(p.base_url.as_deref(), Some("https://api.example.com"));
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("ANTHROPIC_BASE_URL"));
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn run_add_flags_rejects_empty_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, "").unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let err =
+            run_add(None, None, Some("   ".into()), None, None, None, None, None).unwrap_err();
+        assert!(err.to_string().contains("--name"), "got: {err}");
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn run_add_flags_rejects_duplicate() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, "[[profiles]]\nname = \"existing\"\n").unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        // Case-insensitive duplicate guard applies to flag mode too
+        let err = run_add(
+            None,
+            None,
+            Some("EXISTING".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("already exists"), "got: {err}");
 
         std::env::remove_var("CCT_CONFIG");
     }

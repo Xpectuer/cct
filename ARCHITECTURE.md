@@ -43,7 +43,7 @@ Each module has no circular dependency. `launch` dispatches to `exec_claude` or 
 | `app` | `src/app.rs` | Cursor state (`selected`), `active_backend`, `filtered_indices()`, `switch_backend()`, `AppMode` (Normal/AddForm), `FormState` with `to_new_profile()` as single source of truth for field-index mapping |
 | `ui` | `src/ui.rs` | ratatui rendering — tab bar + 35/65 split filtered list + detail/form panel + footer; `build_form_lines` uses `field_labels(backend)` dynamically; masks sensitive env vars |
 | `launch` | `src/launch.rs` | `build_launch_command` dispatch; `exec_claude`/`exec_codex`; codex launched through local proxy via inline `--config` flags; `exec()` process replacement; open `$EDITOR` |
-| `cli` | `src/cli.rs` | `cct add` interactive CLI subcommand — 6 prompts, masked summary, duplicate guard, `--backend` flag (claude/codex) |
+| `cli` | `src/cli.rs` | `cct add` — interactive 6-prompt mode plus non-interactive `--name` flag mode for agents; masked summary, duplicate guard, `--backend` flag (claude/codex) |
 
 ## Critical Path
 
@@ -56,8 +56,11 @@ src/main.rs (entry point)
   → [TUI only] launch::check_claude_installed()  # `which claude` — false if missing
       → [if missing] launch::prompt_install()
           → prompt "Install now? [Y/n]"
-          → [Y] run `curl -fsSL https://claude.ai/install.sh | bash`
+          → [Y] launch::install_claude() — run `curl -fsSL https://claude.ai/install.sh | bash`
           → re-check PATH + ~/.local/bin fallback → exit 1 on unresolvable failure
+  → [cct run only, Claude profile] if !check_claude_installed() → launch::install_claude()
+      → auto-install, no prompts (agent/script first run)
+      → on failure: error message includes the manual install command
   → config::load_profiles()           # parse TOML → Vec<Profile>
   → crossterm: enable_raw_mode + EnterAlternateScreen
   → App::new(profiles)                # initialize cursor at index 0, mode = Normal
@@ -121,7 +124,7 @@ User presses [a] (mode = Normal)
 
 ### Add Profile — CLI (`cct add`)
 ```
-cct add [--backend claude|codex]
+cct add [--backend claude|codex]                # interactive mode
   → cli::run_add()
       → resolve_backend(--backend flag)  # default claude, case-insensitive
       → 6 sequential prompts (name required, rest optional)
@@ -129,6 +132,12 @@ cct add [--backend claude|codex]
       → masked summary display (API Key shown as "sk-1...key4")
       → Save? (y/n) confirmation
       → config::append_profile(&NewProfile { ... })
+
+cct add --name <n> [--description --base-url --api-key --model --fast-model]  # non-interactive (agents/scripts)
+  → cli::run_add() — --name present
+      → trim + empty/duplicate name checks (error, not prompt)
+      → build NewProfile straight from flags (absent optional fields → None)
+      → config::append_profile(&NewProfile { ... })   # no prompts, no confirmation
 ```
 
 ### Edit Config — CLI (`cct edit`)

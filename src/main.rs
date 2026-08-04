@@ -29,7 +29,8 @@ enum ProxyCommand {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Add a new profile interactively
+    /// Add a new profile. Interactive prompts when --name is omitted;
+    /// fully non-interactive when --name (and any other fields) are given
     Add {
         /// Auth type: "api_key" (default) or "token" (uses ANTHROPIC_AUTH_TOKEN)
         #[arg(long)]
@@ -37,6 +38,24 @@ enum Commands {
         /// Backend: "claude" (default) or "codex"
         #[arg(long)]
         backend: Option<String>,
+        /// Profile name — when provided, skip all prompts and confirmations
+        #[arg(long)]
+        name: Option<String>,
+        /// Description (non-interactive mode)
+        #[arg(long)]
+        description: Option<String>,
+        /// Base URL (non-interactive mode)
+        #[arg(long = "base-url")]
+        base_url: Option<String>,
+        /// API key (non-interactive mode)
+        #[arg(long = "api-key")]
+        api_key: Option<String>,
+        /// Model (non-interactive mode)
+        #[arg(long)]
+        model: Option<String>,
+        /// Fast model, for Haiku/SmallFast tier (non-interactive mode)
+        #[arg(long = "fast-model")]
+        fast_model: Option<String>,
     },
     /// Open profiles.toml in $EDITOR
     Edit,
@@ -68,7 +87,25 @@ fn main() -> Result<()> {
 
     let args = Cli::parse();
     match args.command {
-        Some(Commands::Add { auth_type, backend }) => cli::run_add(auth_type, backend),
+        Some(Commands::Add {
+            auth_type,
+            backend,
+            name,
+            description,
+            base_url,
+            api_key,
+            model,
+            fast_model,
+        }) => cli::run_add(
+            auth_type,
+            backend,
+            name,
+            description,
+            base_url,
+            api_key,
+            model,
+            fast_model,
+        ),
         Some(Commands::Edit) => launch::open_editor(&config::config_path()),
         Some(Commands::Run { name }) => run_profile(name),
         Some(Commands::Env {
@@ -94,7 +131,15 @@ fn run_profile(name: Option<String>) -> Result<()> {
         }
     };
     let err = match profile.backend {
-        config::Backend::Claude => launch::exec_claude(&profile, false),
+        config::Backend::Claude => {
+            // First run for agents: bootstrap claude automatically instead of
+            // failing with a bare exec error. Idempotent — skipped when present.
+            if !launch::check_claude_installed() {
+                println!("Claude CLI not found in PATH. Installing...");
+                launch::install_claude()?;
+            }
+            launch::exec_claude(&profile, false)
+        }
         config::Backend::Codex => launch::exec_codex(&profile),
     };
     eprintln!("Error: {err:#}");
@@ -231,8 +276,8 @@ fn stop_proxy() -> Result<()> {
 }
 
 fn run_tui() -> Result<()> {
-    // Only the interactive TUI offers the install prompt; CLI subcommands
-    // (proxy daemon, add, edit, run, env) must never trigger a silent install.
+    // TUI asks before installing; `cct run` auto-installs (agent-friendly);
+    // other CLI subcommands (proxy daemon, add, edit, env) never install.
     if !launch::check_claude_installed() {
         launch::prompt_install()?;
     }
@@ -474,7 +519,9 @@ mod tests {
     fn clap_routing_add_with_auth_type() {
         let cli = Cli::try_parse_from(["cct", "add", "--auth-type", "token"]).unwrap();
         match cli.command {
-            Some(Commands::Add { auth_type, backend }) => {
+            Some(Commands::Add {
+                auth_type, backend, ..
+            }) => {
                 assert_eq!(auth_type.as_deref(), Some("token"));
                 assert!(backend.is_none());
             }
@@ -486,7 +533,9 @@ mod tests {
     fn clap_routing_add_with_backend() {
         let cli = Cli::try_parse_from(["cct", "add", "--backend", "codex"]).unwrap();
         match cli.command {
-            Some(Commands::Add { auth_type, backend }) => {
+            Some(Commands::Add {
+                auth_type, backend, ..
+            }) => {
                 assert!(auth_type.is_none());
                 assert_eq!(backend.as_deref(), Some("codex"));
             }

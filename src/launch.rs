@@ -345,6 +345,15 @@ pub fn prompt_install() -> Result<()> {
         std::process::exit(0);
     }
 
+    install_claude()
+}
+
+/// Install claude via the official installer script, without prompting.
+/// Non-interactive — `cct run` calls this so agents and scripts can
+/// bootstrap Claude Code on first use instead of failing with a bare
+/// "not found" exec error. Returns Ok(()) on successful install, Err with
+/// an actionable message on failure.
+pub fn install_claude() -> Result<()> {
     println!("\nInstalling Claude CLI...\n");
     let status = Command::new("bash")
         .arg("-c")
@@ -420,6 +429,61 @@ mod tests {
         std::env::set_var("CCT_CLAUDE_BIN", "nonexistent-binary-xyz-12345");
         assert!(!super::check_claude_installed());
         std::env::remove_var("CCT_CLAUDE_BIN");
+    }
+
+    /// Put a fake executable `name` on a unique temp dir, prepend it to PATH,
+    /// and return the temp dir (caller must restore PATH + remove dir).
+    /// `tag` must differ per test — these tests mutate process-global env,
+    /// so they also share a lock (see INSTALL_TEST_LOCK) to avoid races.
+    fn stub_bin_on_path(tag: &str, name: &str, script: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let dir =
+            std::env::temp_dir().join(format!("cct-test-{tag}-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join(name);
+        std::fs::write(&file, script).unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let prev_path = env::var("PATH").unwrap_or_default();
+        env::set_var("PATH", format!("{}:{}", dir.display(), prev_path));
+        dir
+    }
+
+    // Serializes install_claude tests: they mutate PATH, which is process-global.
+    static INSTALL_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn install_claude_success() {
+        let _guard = INSTALL_TEST_LOCK.lock().unwrap();
+        // Fake `bash` exits 0 and CCT_CLAUDE_BIN resolves on the stubbed PATH,
+        // so the installer run + the post-install re-check both succeed.
+        let dir = stub_bin_on_path("ok", "bash", "#!/bin/sh\nexit 0\n");
+        stub_bin_on_path("ok", "fake-claude", "#!/bin/sh\nexit 0\n");
+        env::set_var("CCT_CLAUDE_BIN", "fake-claude");
+
+        let result = super::install_claude();
+
+        env::remove_var("CCT_CLAUDE_BIN");
+        std::fs::remove_dir_all(&dir).unwrap();
+        // PATH stays extended with dir — harmless, dir no longer exists
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn install_claude_failure_mentions_manual_command() {
+        let _guard = INSTALL_TEST_LOCK.lock().unwrap();
+        // Fake `bash` exits 1 → Err must carry the manual install command.
+        let dir = stub_bin_on_path("err", "bash", "#!/bin/sh\nexit 1\n");
+        env::set_var("CCT_CLAUDE_BIN", "fake-claude");
+
+        let err = super::install_claude().unwrap_err();
+
+        env::remove_var("CCT_CLAUDE_BIN");
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(
+            err.to_string()
+                .contains("curl -fsSL https://claude.ai/install.sh | bash"),
+            "error should include the manual install command, got: {err}"
+        );
     }
 
     #[test]
