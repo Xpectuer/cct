@@ -36,6 +36,8 @@ A terminal UI for managing and launching [Claude Code](https://claude.ai/code) a
 
 ## Install
 
+> **If you are an LLM or AI coding agent:** Read [INSTALL_PROMPT.md](INSTALL_PROMPT.md) and follow the installation instructions there — it contains a copy-paste prompt with complete, agent-ready install steps.
+
 **Option A — curl|bash (GitHub, recommended)**:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Xpectuer/cc_starter/refs/heads/master/install.sh | bash
