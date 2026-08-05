@@ -22,7 +22,7 @@ impl<'de> Deserialize<'de> for Backend {
             "codex" => Ok(Backend::Codex),
             "kimi" => Err(Error::custom(
                 "backend = \"kimi\" is no longer supported (removed in v0.6.0); \
-                 delete or migrate this profile to claude/codex",
+                 it is migrated to \"claude\" automatically on load",
             )),
             other => Err(Error::custom(format!(
                 "unknown backend {other:?}, expected one of: claude, codex"
@@ -215,9 +215,70 @@ pub fn validate_profiles(profiles: &[Profile]) -> Result<()> {
     Ok(())
 }
 
+/// Rewrite legacy `backend = "kimi"` profiles as Claude profiles in place.
+/// Pure — parses `content`, rewrites each legacy entry (backend value, kimi-only
+/// fields, missing base URL env), and returns the new document plus the number
+/// of migrated profiles. Fast path: returns the input untouched when the
+/// document contains no "kimi" string.
+pub fn migrate_kimi_profiles(content: &str) -> Result<(String, usize)> {
+    if !content.contains("kimi") {
+        return Ok((content.to_string(), 0));
+    }
+    let mut doc = content
+        .parse::<toml_edit::DocumentMut>()
+        .with_context(|| "parse TOML before kimi migration")?;
+    let Some(profiles) = doc
+        .get_mut("profiles")
+        .and_then(|v| v.as_array_of_tables_mut())
+    else {
+        return Ok((content.to_string(), 0));
+    };
+
+    let mut migrated = 0;
+    for entry in profiles.iter_mut() {
+        if entry.get("backend").and_then(|v| v.as_str()) != Some("kimi") {
+            continue;
+        }
+        // Kimi endpoints are Anthropic-compatible, so the Claude backend is a
+        // lossless target. skip_permissions is legal on Claude and kept.
+        entry["backend"] = value("claude");
+        entry.remove("max_context_size");
+        entry.remove("full_auto");
+        entry.remove("auth_type");
+
+        // exec_claude only reads profile.env — surface a profile-level base_url
+        // into env when a hand-written profile never had an env section.
+        if let Some(url) = entry.get("base_url").and_then(|v| v.as_str()) {
+            let has_env_url = entry
+                .get("env")
+                .and_then(Item::as_table)
+                .and_then(|t| t.get("ANTHROPIC_BASE_URL"))
+                .is_some();
+            if !has_env_url {
+                ensure_env_table(entry)["ANTHROPIC_BASE_URL"] = value(url);
+            }
+        }
+        migrated += 1;
+    }
+
+    Ok((doc.to_string(), migrated))
+}
+
 pub fn load_profiles() -> Result<Vec<Profile>> {
     let path = config_path();
     let content = fs::read_to_string(&path).with_context(|| format!("read config {path:?}"))?;
+
+    // v0.6.0 removed the Kimi backend; migrate legacy `backend = "kimi"`
+    // profiles to claude in place so upgraded configs keep working. Idempotent:
+    // once migrated, the fast path above leaves the file untouched.
+    let (content, migrated) = migrate_kimi_profiles(&content)?;
+    if migrated > 0 {
+        let backup = PathBuf::from(format!("{}.bak", path.display()));
+        fs::copy(&path, &backup).with_context(|| format!("backup config to {backup:?}"))?;
+        fs::write(&path, &content).with_context(|| format!("write migrated config {path:?}"))?;
+        eprintln!("Migrated {migrated} kimi profile(s) to claude backend (backup: {backup:?})");
+    }
+
     let config: Config =
         toml::from_str(&content).with_context(|| format!("parse TOML in {path:?}"))?;
     validate_profiles(&config.profiles)?;
@@ -1773,6 +1834,131 @@ description = "Second profile"
             block.contains("auth_type = \"subscription\""),
             "should contain auth_type, got:\n{block}"
         );
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    // --- kimi profile migration tests ---
+
+    #[test]
+    fn migrate_kimi_profiles_rewrites_backend() {
+        let src = r#"# user comment
+
+[[profiles]]
+name = "default"
+
+[[profiles]]
+name = "my-kimi"
+description = "Kimi endpoint"
+backend = "kimi"
+model = "kimi-k2"
+base_url = "https://api.kimi.com/v1"
+max_context_size = "1m"
+
+[profiles.env]
+ANTHROPIC_BASE_URL = "https://api.kimi.com/v1"
+ANTHROPIC_API_KEY = "sk-secret"
+ANTHROPIC_MODEL = "kimi-k2"
+"#;
+        let (out, migrated) = migrate_kimi_profiles(src).unwrap();
+        assert_eq!(migrated, 1);
+        assert!(
+            out.contains("# user comment"),
+            "comment should be preserved, got:\n{out}"
+        );
+        assert!(out.contains("backend = \"claude\""));
+        assert!(!out.contains("backend = \"kimi\""));
+        assert!(
+            !out.contains("max_context_size"),
+            "max_context_size should be removed, got:\n{out}"
+        );
+        assert!(
+            out.contains("ANTHROPIC_API_KEY = \"sk-secret\""),
+            "existing env values should be untouched"
+        );
+
+        // Round-trip: migrated document parses as a Claude profile
+        let cfg: Config = toml::from_str(&out).unwrap();
+        let p = cfg.profiles.iter().find(|p| p.name == "my-kimi").unwrap();
+        assert_eq!(p.backend, Backend::Claude);
+        assert_eq!(p.model.as_deref(), Some("kimi-k2"));
+        assert_eq!(p.description.as_deref(), Some("Kimi endpoint"));
+    }
+
+    #[test]
+    fn migrate_kimi_profiles_idempotent() {
+        let src = "[[profiles]]\nname = \"k1\"\nbackend = \"kimi\"\n";
+        let (out, first) = migrate_kimi_profiles(src).unwrap();
+        assert_eq!(first, 1);
+        let (out2, second) = migrate_kimi_profiles(&out).unwrap();
+        assert_eq!(second, 0);
+        assert_eq!(out, out2);
+    }
+
+    #[test]
+    fn migrate_kimi_profiles_fills_missing_base_url_env() {
+        // No env table at all — created from profile-level base_url
+        let src =
+            "[[profiles]]\nname = \"k1\"\nbackend = \"kimi\"\nbase_url = \"https://api.kimi.com/v1\"\n";
+        let (out, migrated) = migrate_kimi_profiles(src).unwrap();
+        assert_eq!(migrated, 1);
+        let cfg: Config = toml::from_str(&out).unwrap();
+        let env = cfg.profiles[0].env.as_ref().expect("env should be created");
+        assert_eq!(
+            env.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://api.kimi.com/v1")
+        );
+
+        // Env table exists but lacks the URL — filled, other keys kept
+        let src2 = "[[profiles]]\nname = \"k2\"\nbackend = \"kimi\"\nbase_url = \"https://api.kimi.com/v1\"\n\n[profiles.env]\nANTHROPIC_API_KEY = \"sk-secret\"\n";
+        let (out2, migrated2) = migrate_kimi_profiles(src2).unwrap();
+        assert_eq!(migrated2, 1);
+        let cfg2: Config = toml::from_str(&out2).unwrap();
+        let env2 = cfg2.profiles[0].env.as_ref().expect("env should exist");
+        assert_eq!(
+            env2.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://api.kimi.com/v1")
+        );
+        assert_eq!(
+            env2.get("ANTHROPIC_API_KEY").map(String::as_str),
+            Some("sk-secret")
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn load_profiles_migrates_and_backs_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        let original = r#"# kept comment
+[[profiles]]
+name = "default"
+
+[[profiles]]
+name = "old-kimi"
+backend = "kimi"
+base_url = "https://api.kimi.com/v1"
+max_context_size = "1m"
+
+[profiles.env]
+ANTHROPIC_API_KEY = "sk-secret"
+"#;
+        std::fs::write(&path, original).unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let profiles = load_profiles().unwrap();
+        let kimi = profiles.iter().find(|p| p.name == "old-kimi").unwrap();
+        assert_eq!(kimi.backend, Backend::Claude);
+
+        // Config rewritten in place, comment preserved
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("# kept comment"));
+        assert!(!content.contains("backend = \"kimi\""));
+
+        // Backup holds the pre-migration text
+        let backup_path = format!("{}.bak", path.display());
+        let backup = std::fs::read_to_string(&backup_path).unwrap();
+        assert_eq!(backup, original);
 
         std::env::remove_var("CCT_CONFIG");
     }

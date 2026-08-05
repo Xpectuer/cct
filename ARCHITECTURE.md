@@ -61,7 +61,7 @@ src/main.rs (entry point)
   → [cct run only, Claude profile] if !check_claude_installed() → launch::install_claude()
       → auto-install, no prompts (agent/script first run)
       → on failure: error message includes the manual install command
-  → config::load_profiles()           # parse TOML → Vec<Profile>
+  → config::load_profiles()           # auto-migrate legacy kimi profiles → parse TOML → Vec<Profile>
   → crossterm: enable_raw_mode + EnterAlternateScreen
   → App::new(profiles)                # initialize cursor at index 0, mode = Normal
   → loop:
@@ -269,5 +269,6 @@ graph TB
 - **Dual add surface (CLI + TUI)**: `cct add` (CLI) and `a` key (TUI) both funnel through `config::append_profile`. The CLI selects the backend via `--backend` (default Claude); the TUI uses `active_backend`.
 - **Autoinstall on TUI startup**: `run_tui` calls `launch::check_claude_installed()` before entering raw mode. If `claude` is absent, `prompt_install()` offers to run the official installer interactively. CLI subcommands (`proxy`, `add`, `edit`, `run`, `env`) never trigger the install prompt — the proxy daemon in particular must start without a `claude` binary present.
 - **`install.sh` curl|bash installer**: A standalone Bash script downloads the latest GitHub Release tarball, verifies it with `tar -tzf`, retries up to 3 times on download failure, and installs to `~/.local/bin`. Does not require root.
+- **Automatic Kimi migration**: `config::load_profiles()` rewrites legacy `backend = "kimi"` profiles to `claude` (via `migrate_kimi_profiles`) before TOML deserialization, so a removed backend never blocks startup. The original file is backed up to `profiles.toml.bak`; kimi-only fields (`max_context_size`, `full_auto`, `auth_type`) are dropped and a missing `ANTHROPIC_BASE_URL` env entry is filled from the profile-level `base_url`. Idempotent — once migrated, the file is never touched again.
 
 <!-- END:architecture -->

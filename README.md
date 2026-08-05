@@ -113,6 +113,10 @@ OPENAI_API_KEY = "sk-..."
    - `cct env <profile> -- <command>` — run a command with a profile's env vars
    - `cct env` — list all profiles non-interactively
 
+## Upgrading from a Kimi-era version
+
+The Kimi backend was removed in v0.6.0. On first run after upgrading, any leftover profile with `backend = "kimi"` is **automatically migrated to `claude`** — Kimi endpoints are Anthropic-compatible, so the profile keeps working unchanged (same `base_url` / API key / model). The pre-migration file is backed up to `profiles.toml.bak` and one log line is printed to stderr; no manual edit is needed.
+
 ## Tips
 
 **Pass arbitrary flags to Claude.** `cct env` injects a profile's environment and runs whatever command you give it — the command doesn't need to be aware of `cct` at all. To launch Claude with extra flags that `cct` doesn't natively expose:

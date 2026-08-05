@@ -50,7 +50,7 @@ The app is five focused modules with no shared mutable state:
 
 | Module | File | Responsibility |
 |--------|------|----------------|
-| `config` | `src/config.rs` | Deserialize `profiles.toml`; `Backend` enum; `validate_profiles`; write default config; append/update profiles with backend-specific env generation; `toggle_skip_permissions`, `toggle_auth_type`, `toggle_full_auto` via toml_edit |
+| `config` | `src/config.rs` | Deserialize `profiles.toml`; `Backend` enum; `validate_profiles`; write default config; append/update profiles with backend-specific env generation; `toggle_skip_permissions`, `toggle_auth_type`, `toggle_full_auto` via toml_edit; auto-migrate legacy `kimi` profiles on load |
 | `app` | `src/app.rs` | Cursor state, `active_backend`, `filtered_indices()`, `switch_backend()`, `AppMode` (Normal/AddForm), `FormState` with `to_new_profile()` as single source of truth |
 | `ui` | `src/ui.rs` | ratatui rendering — tab bar + 35/65 split filtered list+detail panel + footer; backend-aware `build_form_lines`; masks sensitive env vars |
 | `launch` | `src/launch.rs` | `build_launch_command` dispatch; `exec_claude`/`exec_codex`; `build_codex_proxy_config_args`; `exec()` process replace; open `$EDITOR`; check/install claude binary |
@@ -66,6 +66,7 @@ The app is five focused modules with no shared mutable state:
 - Codex launch: `CODEX_HOME` is never set — all profiles share the default `~/.codex` history/sessions; proxy mode (API key) injects the custom provider via 6 inline `--config` flags (`build_codex_proxy_config_args`) instead of writing `config.toml`, and subscription mode (OAuth) passes `--config model_provider=openai`.
 - `s` key toggles `skip_permissions` on the selected Claude profile; `t` key toggles `auth_type` between `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN`; `d` key duplicates the selected profile (appends `_copy` to name, opens pre-filled add form); all persisted via `toml_edit` to preserve comments.
 - On TUI startup, if `claude` is missing, `prompt_install()` offers to run the official installer before entering raw mode; `cct run` auto-installs non-interactively (`install_claude()`) so agents and scripts work on first run.
+- Kimi profiles (removed in v0.6.0) are migrated automatically: `load_profiles()` rewrites `backend = "kimi"` → `"claude"` via `migrate_kimi_profiles` before parsing (kimi endpoints are Anthropic-compatible, so launch behavior is preserved), backs up the original to `profiles.toml.bak`, and prints one stderr line. Idempotent — the fast path skips untouched files.
 
 ## Config File Format
 

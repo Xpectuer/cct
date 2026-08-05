@@ -3,8 +3,8 @@ doc_type: module
 module_name: "config"
 module_path: "src/config.rs"
 generated_by: mci-phase-2
-revision: 5
-updated: 2026-07-17
+revision: 7
+updated: 2026-08-05
 ---
 
 # config Module Documentation
@@ -22,7 +22,7 @@ updated: 2026-07-17
 - `enum Backend` — discriminates the two supported launch backends:
   - `Claude` (default, via `#[derive(Default)]`) — profiles launched with the `claude` CLI.
   - `Codex` — profiles launched with the `codex` CLI.
-  - Custom `Deserialize` impl (no derive): TOML `backend = "claude"` / `"codex"` map to the matching variant; `backend = "kimi"` fails with "no longer supported (removed in v0.6.0)"; any other value fails with "unknown backend".
+  - Custom `Deserialize` impl (no derive): TOML `backend = "claude"` / `"codex"` map to the matching variant; `backend = "kimi"` (removed in v0.6.0) fails with a hint that it is migrated automatically — normally unreachable because `load_profiles()` rewrites kimi profiles *before* deserialization; any other value fails with "unknown backend".
   - Derives: `Debug`, `Default`, `Clone`, `PartialEq`.
 
 - `struct Profile` — Represents one launch profile loaded from TOML. All fields except `name` are optional:
@@ -68,8 +68,15 @@ updated: 2026-07-17
     - `backend == Claude && full_auto == Some(true)` — full_auto is codex-only.
   - Returns `Err` with a descriptive message naming the offending profile on first violation found.
 
+- `migrate_kimi_profiles(content: &str) -> Result<(String, usize)>`
+  - Pure function (no I/O) used by `load_profiles` to rewrite legacy `backend = "kimi"` profiles in place.
+  - Fast path: documents containing no `"kimi"` string are returned untouched with count `0`.
+  - Per migrated entry: `backend` → `"claude"` (explicit, not relying on the default), drops kimi-only fields `max_context_size` / `full_auto` / `auth_type` (all rejected by kimi-era validation or by `validate_profiles` on Claude), keeps `skip_permissions` (legal on Claude), and fills `env.ANTHROPIC_BASE_URL` from the profile-level `base_url` when absent — `launch::exec_claude` only injects `profile.env`.
+  - Returns the rewritten document plus the number of migrated profiles; preserves comments/formatting via `toml_edit::DocumentMut`.
+
 - `load_profiles() -> Result<Vec<Profile>>`
   - Reads the file at `config_path()` to a `String`.
+  - Runs `migrate_kimi_profiles` first so a leftover kimi profile never blocks startup. When migration happens: copies the original to `<path>.bak`, writes the rewritten document back, and prints one stderr line (`Migrated N kimi profile(s)…`). Idempotent — a second call hits the fast path and leaves the file untouched.
   - Parses the full TOML document; then calls `validate_profiles` before returning.
   - Returns `anyhow::Result<Vec<Profile>>`; propagates I/O, parse, and validation errors.
 
@@ -170,6 +177,12 @@ The `config` module holds no heap-allocated state between calls. Every function 
 - `load_profiles()` wraps `toml::from_str` with `.with_context(|| format!("parse TOML in {path:?}"))`. A malformed `profiles.toml` (e.g., after a user edit) surfaces as an `anyhow::Error` in `main`. The hot-reload path in `main.rs` handles this gracefully with a `match` that prints a warning and retains the previously-loaded profiles rather than crashing.
 - Missing required field: `Profile.name` is the only non-optional field. A `[[profiles]]` block without `name` will fail deserialization with a serde error.
 
+### Legacy Kimi Profiles
+
+- `backend = "kimi"` (removed in v0.6.0) never reaches deserialization: `load_profiles()` migrates it to `"claude"` first, so upgraded configs start normally instead of failing fast.
+- Migration rewrites the file only when a kimi profile is actually present; the pre-migration text is preserved in `<path>.bak` (fixed name — migration happens at most once, so the backup never collides).
+- If the config file is read-only and the migration write fails, `load_profiles()` returns the write error and the user sees the kimi hint from the `Backend` deserializer as a fallback message.
+
 ### DEFAULT_CONFIG Bootstrap
 
 - `ensure_default_config()` is idempotent: it only writes the file if it does not already exist. A partially-written or corrupted file that exists on disk will NOT be overwritten; `load_profiles()` will return a parse error instead.
@@ -263,4 +276,4 @@ fn main() -> anyhow::Result<()> {
 ---
 
 **Template Version**: 2.0
-**Last Updated**: 2026-08-04 (revision 6 — removed Kimi backend: `Backend::Kimi` variant, `max_context_size` fields, `ensure_kimi_profile`, `default_max_context_size`/`resolve_max_context_size`, `toggle_kimi_max_context_size`, Kimi validate/append rules)
+**Last Updated**: 2026-08-05 (revision 7 — automatic Kimi migration: new `migrate_kimi_profiles` pure function, `load_profiles` migration + backup + stderr log, kimi deserializer hint updated)
