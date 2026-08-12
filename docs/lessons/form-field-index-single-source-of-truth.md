@@ -4,8 +4,8 @@ doc_type: lesson
 brief: "When UI labels and data mapping share a field-index contract, any divergence silently corrupts user input"
 confidence: verified
 created: 2026-03-15
-updated: 2026-03-15
-revision: 1
+updated: 2026-08-12
+revision: 2
 ---
 
 # Lesson: Form Field Index Must Have a Single Source of Truth
@@ -14,10 +14,10 @@ revision: 1
 
 During the codex backend implementation, the TUI add-form was extended to support two different field layouts:
 
-- **Claude**: `[0]=Name, [1]=Description, [2]=Base URL, [3]=API Key, [4]=Model`
-- **Codex**: `[0]=Name, [1]=Base URL, [2]=API Key, [3]=Model, [4]=Full Auto (y/n)`
+- **Claude**: `[0]=Name, [1]=Description, [2]=Base URL, [3]=API Key, [4]=Pro Model, [5]=Fast Model`
+- **Codex**: `[0]=Name, [1]=Base URL, [2]=API Key, [3]=Model, [4]=Approval, [5]=unused`
 
-Both layouts share the same `[String; 5]` buffer in `FormState`.
+Both layouts share the same `[String; 6]` buffer in `FormState`. The sixth slot lets Claude expose a separate fast model while Codex leaves that slot unused.
 
 ## The Bug
 
@@ -34,7 +34,7 @@ This was a **silent data loss bug** — no error, no warning, wrong output.
 
 Two changes were made together:
 
-### 1. `field_labels(backend: &Backend) -> [&'static str; 5]` in app.rs
+### 1. `field_labels(backend: &Backend) -> [&'static str; 6]` in app.rs
 
 A free function that returns the correct label array for the active backend. `build_form_lines()` calls `field_labels(&form.backend)` dynamically instead of hard-coding `FIELD_LABELS`.
 

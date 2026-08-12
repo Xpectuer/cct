@@ -1,11 +1,11 @@
 ---
 title: "Cross-Module Features Need Contract Tests"
 doc_type: rule
-brief: "Features that span app, ui, config, main, and launch must be verified at the shared contract boundaries"
+brief: "Features spanning app, ui, config, main, launch, or proxy must be verified at shared contract boundaries"
 confidence: verified
 created: 2026-03-22
-updated: 2026-03-22
-revision: 1
+updated: 2026-08-12
+revision: 2
 ---
 
 # Cross-Module Features Need Contract Tests

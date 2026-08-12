@@ -4,8 +4,8 @@ doc_type: lesson
 brief: "The proxy concatenates base_url + client path; OpenAI-compatible clients send paths that already start with /v1, so a base_url ending in /v1 produces /v1/v1/... and a 404 — verify prefix semantics against real client traffic"
 confidence: verified
 created: 2026-08-04
-updated: 2026-08-04
-revision: 1
+updated: 2026-08-12
+revision: 2
 ---
 
 # Lesson: Proxy Forwarding Base URL Must Not Carry the API Version Prefix
@@ -57,8 +57,7 @@ proxy 拼接:  https://clauddy.com + /v1/responses = https://clauddy.com/v1/resp
 ## The Fix
 
 - Changed the profile: `base_url = "https://clauddy.com"` (drop `/v1`).
-- Doc example in `codex-backend-development-guide.md` should be corrected to the
-  no-prefix form.
+- Corrected the example in `codex-backend-development-guide.md` to the no-prefix form.
 
 ## Rule Derived
 
@@ -77,7 +76,7 @@ proxy 拼接:  https://clauddy.com + /v1/responses = https://clauddy.com/v1/resp
 
 ## Related
 
-- [[external-tool-config-schema-must-be-verified]] — sibling lesson: verify
+- [External tool config schema must be verified](external-tool-config-schema-must-be-verified.md) — sibling lesson: verify
   external contracts against working examples, never by analogy
 - `src/proxy.rs` — `handle_request` concatenation logic
-- `docs/references/codex-backend-development-guide.md` — the doc example that needs fixing
+- `docs/references/codex-backend-development-guide.md` — the corrected no-prefix example

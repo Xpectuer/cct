@@ -4,8 +4,8 @@ doc_type: rule
 brief: "Any user-visible rendering of secret-like config values must apply the shared masking policy"
 confidence: verified
 created: 2026-03-22
-updated: 2026-03-22
-revision: 1
+updated: 2026-08-12
+revision: 2
 ---
 
 # Mask Secrets on Every Display Path
@@ -16,13 +16,13 @@ Any UI, confirmation summary, detail panel, or debug-facing display of config/en
 
 ## Required Practice
 
-- Reuse one masking helper instead of open-coding redaction.
+- Route each display surface through its designated masking helper instead of printing raw secrets or open-coding redaction (`ui::mask_value` in the TUI and `cli::mask_key` in CLI summaries).
 - Apply masking in confirmation views as well as steady-state detail views.
-- Expand the shared policy centrally if the definition of sensitive keys changes.
+- When the definition of sensitive data changes, update every surface-specific helper and its tests in the same changeset.
 
 ## Why
 
-This project already treats `TOKEN`, `KEY`, and `SECRET` as sensitive display paths. Re-implementing that logic locally creates inconsistent leakage risk.
+The TUI treats env keys containing `TOKEN`, `KEY`, or `SECRET` as sensitive, while the CLI add summary masks the API-key value explicitly. Bypassing those helpers creates inconsistent leakage risk.
 
 See:
 - `docs/modules/ui.md`
@@ -31,4 +31,4 @@ See:
 
 ## Review Check
 
-If a new screen prints env or credential-like fields without going through `mask_value`, it violates this rule.
+If a new screen or summary prints env or credential-like fields without going through the masking helper for that surface, it violates this rule.

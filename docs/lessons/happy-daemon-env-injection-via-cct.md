@@ -4,9 +4,9 @@ doc_type: lesson
 brief: "Use cct env <profile> -- happy daemon start to seed daemon-spawned sessions with profile environment variables"
 confidence: verified
 created: 2026-07-03
-updated: 2026-07-03
-revision: 1
-claude_md_coverage: false
+updated: 2026-08-12
+revision: 2
+claude_md_coverage: true
 tags: [happy, daemon, env, cct, trick]
 ---
 
@@ -74,4 +74,4 @@ cct env <profile> -- happy daemon start
 ## Related
 
 - [cct env uses exec, not a shell](cct-env-exec-no-shell-expansion.md) — why `cct env` can't expand `$VAR` or globs
-- `src/launch.rs:165` — `exec_with_env()` implementation
+- `src/launch.rs` — `exec_with_env()` implementation

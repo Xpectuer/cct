@@ -4,8 +4,8 @@ doc_type: lesson
 brief: "When writing config or auth files for external CLI tools, verify the exact schema from a working example — never guess key names or field presence"
 confidence: verified
 created: 2026-03-25
-updated: 2026-03-25
-revision: 1
+updated: 2026-08-12
+revision: 2
 ---
 
 # Lesson: External Tool Config Schema Must Be Verified Against Working Examples
@@ -15,6 +15,8 @@ revision: 1
 During the `codex` auth sync feature (`write_codex_auth`), the task was to write an
 `auth.json` file to `$CODEX_HOME/` so that codex CLI could pick up the API key at
 launch time, without requiring the user to configure it separately.
+
+> Historical note (2026-08-12): `cct` no longer writes Codex `auth.json`. Current API-key profiles send credentials to the local proxy over its control socket, while subscription profiles use Codex's default `~/.codex` state. The schema-verification lesson remains applicable to future external-tool integrations.
 
 The initial schema was guessed based on a plausible-looking convention.
 
@@ -98,4 +100,4 @@ Analogy from variable naming (e.g., env var `OPENAI_API_KEY` → JSON key
 ## Related
 
 - `docs/procs/tdd-codex-auth-sync-20260325140224/` — the TDD session where this was found and fixed
-- `src/launch.rs` — `write_codex_auth()` and its tests
+- `docs/references/codex-backend-development-guide.md` — current Codex launch and authentication architecture

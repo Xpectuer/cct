@@ -4,8 +4,8 @@ doc_type: lesson
 brief: "How to cross-compile Rust musl binaries on self-hosted GitLab Docker runners — zigbuild over cross, YAML multiline traps, and package registry uploads"
 confidence: verified
 created: 2026-05-13
-updated: 2026-05-13
-revision: 1
+updated: 2026-08-12
+revision: 2
 ---
 
 # GitLab CI/CD Rust musl Cross-Compilation on Self-Hosted Runners
@@ -93,5 +93,5 @@ See `.gitlab-ci.yml` — the build stage uses zigbuild for aarch64 and native ca
 
 ## Related
 
-- [[gitlab-runner-ssh-cloning-self-hosted]]
+- [GitLab Runner SSH cloning on self-hosted instances](gitlab-runner-ssh-cloning-self-hosted.md)
 - install.sh now supports GitLab-hosted releases via `GITLAB_URL` / `GITLAB_PROJECT` env vars

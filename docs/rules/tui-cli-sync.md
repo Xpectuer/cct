@@ -1,12 +1,13 @@
 ---
 title: TUI-CLI Sync
 doc_type: rule
-brief: When adding or modifying a TUI feature (hotkey, toggle, setting, action on a profile), always review whether the CLI sur
-confidence: speculative
+brief: "When changing a TUI profile workflow, review whether scripts need an equivalent CLI option, flag, or subcommand"
+confidence: verified
 created: 2026-06-30
-updated: 2026-06-30
-revision: 1
+updated: 2026-08-12
+revision: 2
 ---
+
 # TUI-CLI Sync
 
 ## Rule
@@ -25,4 +26,4 @@ The auth_type toggle (`t` hotkey) was initially implemented without CLI support.
 
 ## Review Check
 
-If a PR adds a TUI key binding that changes profile state but the `cct add` help text doesn't mention a corresponding flag, it's incomplete.
+If a PR adds a TUI path that changes profile state, verify the equivalent scripted workflow. Add CLI parity when users need it; otherwise record why the action is intentionally interactive-only.

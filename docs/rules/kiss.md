@@ -4,8 +4,8 @@ doc_type: rule
 brief: "Make Both Design Decision and Code Style As Simple/Stupid As Possible"
 confidence: authoritative
 created: 2026-03-02
-updated: 2026-03-14
-revision: 2
+updated: 2026-08-12
+revision: 3
 ---
 
 # KISS — Keep It Simple, Stupid
@@ -20,7 +20,7 @@ revision: 2
 - **不过度抽象**：三处重复代码才考虑提取，单次使用的逻辑直接内联。
 - **不增加配置项**：能写死的先写死，能用约定替代的不用配置。
 - **exec 不 spawn**：`cct` 用 `exec` 替换进程而非 `spawn` 子进程，因为这是最简单的正确行为，无需管理生命周期。
-- **五模块扁平结构**：`config / app / ui / launch / cli` 无共享可变状态，职责单一，不引入额外分层。
+- **六模块扁平结构**：`config / app / ui / launch / cli / proxy` 职责单一，不引入不必要的额外分层。代理守护进程的可变状态封装在 `proxy` 内，TUI 仍由 `App` 单点持有。
 
 ## 代码风格
 
@@ -40,6 +40,6 @@ revision: 2
 
 | 反例 | 正确做法 |
 |------|---------|
-| 为"将来可能支持多后端"引入 trait object | 直接调用函数，等真正有第二个后端时再抽象 |
+| 为两个已知后端引入 trait object 和动态注册机制 | 用 `Backend` 枚举和直接分发，等实际扩展压力出现再抽象 |
 | 每个错误分支都单独定义错误类型 | 用 `anyhow::Error` 或 `String` 贯穿，只在公共 API 边界定义具名错误 |
 | 用 `Arc<Mutex<>>` 共享 App 状态 | `App` 结构体在主循环中单线程持有，无需同步原语 |

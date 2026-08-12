@@ -4,8 +4,8 @@ doc_type: reference
 brief: "Implementation contract for the Codex backend in cct: config schema, validation, UI behavior, launch flow, and full_auto toggling"
 confidence: verified
 created: 2026-03-22
-updated: 2026-08-02
-revision: 2
+updated: 2026-08-12
+revision: 3
 ---
 
 # Reference: Codex Backend Development Guide
@@ -34,7 +34,7 @@ Relevant profile fields for Codex:
 | Field | Location | Meaning |
 |------|----------|---------|
 | `backend` | profile | Must be `"codex"` |
-| `base_url` | profile | Upstream URL passed to the local proxy (also encoded in the `model_providers.custom.base_url` `--config` flag) |
+| `base_url` | profile | Upstream root URL passed to the local proxy; omit the API version suffix because the client path already includes `/v1` |
 | `model` | profile | Passed via `--config model=<model>`; defaults to `gpt-4.1` at launch time if omitted |
 | `full_auto` | profile | Approval level (`untrusted`/`never`/`danger`) — maps to `--ask-for-approval` or `--dangerously-bypass-approvals-and-sandbox` |
 | `extra_args` | profile | Passed through to the `codex` CLI |
@@ -79,7 +79,7 @@ Example:
 name = "openai-prod"
 backend = "codex"
 model = "gpt-5"
-base_url = "https://api.openai.com/v1"
+base_url = "https://api.openai.com"
 full_auto = "never"
 
 [profiles.env]
@@ -88,19 +88,19 @@ OPENAI_API_KEY = "sk-..."
 
 ## Add-Form Mapping
 
-The add form stays fixed at 5 fields, but the field semantics depend on backend.
+The add form uses a fixed 6-slot buffer, but the field semantics depend on backend.
 `app::FormState::to_new_profile()` is the single source of truth.
 
 Claude field labels:
 
 ```text
-["Name *", "Description", "Base URL", "API Key", "Model"]
+["Name *", "Description", "Base URL", "API Key", "Pro Model", "Fast Model"]
 ```
 
 Codex field labels:
 
 ```text
-["Name *", "Base URL", "API Key", "Model", "Approval"]
+["Name *", "Base URL", "API Key", "Model", "Approval", ""]
 ```
 
 Codex field-index mapping:
@@ -112,6 +112,7 @@ Codex field-index mapping:
 | 2 | API Key | `api_key` |
 | 3 | Model | `model` |
 | 4 | Approval | `full_auto` |
+| 5 | Reserved/blank | ignored |
 
 Codex add-form specifics:
 
@@ -121,10 +122,9 @@ Codex add-form specifics:
 - any other value maps to `None`
 - the form backend is initialized from `app.active_backend` when entering add mode
 
-The standalone CLI flow `cct add` remains Claude-only and always creates:
-
-- `backend = Claude`
-- `full_auto = None`
+The standalone CLI flow `cct add` accepts `--backend claude|codex`. It always creates
+`full_auto = None`; approval is currently selected in the TUI or configured directly in
+`profiles.toml`.
 
 ## TUI Behavior
 
@@ -145,10 +145,10 @@ Codex-specific UI behavior:
   `approval_label`; unset shows `approval: on-request`)
 - the footer hint changes to `s: Approval` on the Codex tab
 
-Claude-only hotkeys are intentionally not shared with Codex:
+Some hotkeys are backend-specific:
 
 - `c` resume applies only to Claude
-- `skip_permissions` toggling applies only to Claude
+- `s` toggles `skip_permissions` for Claude and cycles approval for Codex
 
 ## Runtime Launch Flow
 

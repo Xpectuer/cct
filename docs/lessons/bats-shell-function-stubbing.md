@@ -4,8 +4,8 @@ doc_type: lesson
 brief: "How to stub external commands (curl, uname, sleep) in BATS tests by overriding them as exported bash functions"
 confidence: verified
 created: 2026-03-10
-updated: 2026-03-10
-revision: 1
+updated: 2026-08-12
+revision: 2
 ---
 
 # Lesson: BATS Shell Function Stubbing with export -f
@@ -41,8 +41,9 @@ MOCK_JSON
 
 ## Rules
 
-1. **Declare the function before `source`ing the script.** The override must be in scope when
-   the script's function definitions are executed.
+1. **Declare the function before invoking the code under test.** Defining it before `source`
+   is the simplest convention and is required when the script performs relevant work at source
+   time; a script containing only function definitions resolves the command when the function runs.
 2. **Use `export -f <name>`** after the function definition so it is visible to subshells that
    the sourced script might spawn (e.g., command substitutions like `$(curl ...)`).
 3. **Override `sleep` to a no-op** in retry tests to avoid wall-clock delays:
@@ -100,10 +101,10 @@ pre-populated before calling a downstream function in isolation:
 
 ## What Doesn't Work
 
-- **Symlink or PATH prepend approach**: Creating a fake `curl` binary in a temp dir and
-  prepending it to `$PATH` works for subshell invocations but not for functions called
-  within the same shell (command substitutions in sourced scripts). `export -f` is more
-  reliable for sourced scripts.
+- **Symlink or PATH prepend approach**: Creating a fake executable in a temp directory and
+  prepending it to `$PATH` also works, including inside command substitutions. It is useful
+  when testing a separate process or a non-Bash shell. For a sourced Bash script, exported
+  functions are usually shorter and avoid creating executable fixture files.
 - **Calling `main` directly with mocks**: The `main()` function calls all sub-functions in
   sequence, making it hard to isolate individual functions. Test each function independently
   after sourcing.

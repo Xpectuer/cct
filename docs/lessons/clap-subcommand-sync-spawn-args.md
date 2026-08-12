@@ -4,8 +4,8 @@ doc_type: lesson
 brief: "When a clap subcommand gains a required child enum, every code path that spawns the binary with that subcommand must be updated"
 confidence: verified
 created: 2026-07-15
-updated: 2026-07-15
-revision: 1
+updated: 2026-08-12
+revision: 2
 ---
 
 # Lesson: Spawn Args Must Stay in Sync With Clap Subcommand Changes
@@ -30,7 +30,7 @@ enum Commands {
 
 ## Failure
 
-`ensure_proxy_running`（`src/launch.rs:91`）中 spawn proxy 守护进程的代码未被更新：
+`ensure_proxy_running`（`src/launch.rs`）中 spawn proxy 守护进程的代码未被更新：
 
 ```rust
 // 错误：仍然只传 "proxy"

@@ -1,12 +1,13 @@
 ---
 title: Update Docs After New Feature
 doc_type: rule
-brief: After implementing a new feature (new hotkey, new CLI flag, new config field, new toggle, new backend behavior), update
-confidence: speculative
+brief: "Update user, architecture, agent, and module documentation in the same changeset as a behavior change"
+confidence: verified
 created: 2026-06-30
-updated: 2026-06-30
-revision: 1
+updated: 2026-08-12
+revision: 2
 ---
+
 # Update Docs After New Feature
 
 ## Rule
@@ -15,7 +16,7 @@ After implementing a new feature (new hotkey, new CLI flag, new config field, ne
 
 1. **README.md** — user-facing features list, keybindings table, subcommands table, config example
 2. **ARCHITECTURE.md** — Configuration-Driven Logic table, Critical Path flows, Key Design Decisions
-3. **CLAUDE.md** — module description table, key design choices, config file format example
+3. **CLAUDE.md / AGENTS.md** — module description table, key design choices, config file format example (`AGENTS.md` is a symlink to `CLAUDE.md` in this repository)
 4. **docs/modules/*.md** — interface sections (new types, fields, functions), edge cases, usage examples
 
 ## Why
@@ -27,5 +28,5 @@ The auth_type feature was initially merged with code changes only. README keybin
 When wrapping up a feature:
 - Audit `README.md` — is the new hotkey in the keybinding table? Is the new CLI flag in the subcommands table?
 - Audit `ARCHITECTURE.md` — is the new config field in the Configuration-Driven Logic table? Is the new flow in Critical Path?
-- Audit `CLAUDE.md` — are module descriptions up to date? Is the config example current?
+- Audit `CLAUDE.md` / `AGENTS.md` — are module descriptions and the docs index up to date? Is the config example current?
 - Audit `docs/modules/<touched>.md` — are new struct fields, functions, and edge cases documented?

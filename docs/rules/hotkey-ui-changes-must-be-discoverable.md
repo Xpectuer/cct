@@ -4,8 +4,8 @@ doc_type: rule
 brief: "Any new interactive key path must update the visible UI hints and ship with coverage for discoverability"
 confidence: verified
 created: 2026-03-22
-updated: 2026-03-22
-revision: 1
+updated: 2026-08-12
+revision: 2
 ---
 
 # Hotkey UI Changes Must Be Discoverable
@@ -17,7 +17,7 @@ Any newly added key binding in the TUI must also be reflected in the footer or e
 ## Required Practice
 
 - Update the footer when adding a hotkey.
-- Add at least one test covering either the footer hint or the dispatch path.
+- Test the footer hint so discoverability cannot drift; test the dispatch path separately when the action has behavior beyond navigation.
 - Treat undocumented hotkeys as incomplete features.
 
 ## Why

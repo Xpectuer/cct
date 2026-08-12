@@ -139,10 +139,12 @@ Lessons:
 - [BATS stubbing](docs/lessons/bats-shell-function-stubbing.md) — export -f pattern for shell test isolation
 - [Form field index single source of truth](docs/lessons/form-field-index-single-source-of-truth.md) — why polymorphic field buffers need a single mapping function
 - [External tool config schema must be verified](docs/lessons/external-tool-config-schema-must-be-verified.md) — auth.json key casing and required fields must be confirmed from a working example, not guessed
-- [cct env uses exec, not a shell](docs/lessons/cct-env-exec-no-shell-expansion.md) — no variable expansion; wrap in `sh -c` when needed
+- [cct env preserves argument boundaries](docs/lessons/cct-env-exec-no-shell-expansion.md) — shell syntax passed as literal argv stays literal; use `sh -c` explicitly when needed
 - [cct env can inject env vars into happy daemon](docs/lessons/happy-daemon-env-injection-via-cct.md) — use `cct env <profile> -- happy daemon start` to seed daemon sessions with profile env
-- [install.sh 404 network issue](docs/lessons/install-script-404-network-issue.md) — HTTP 404 from GitHub API can mean connectivity failure, not missing releases
+- [install.sh intercepted 404](docs/lessons/install-script-404-network-issue.md) — a proxy/intermediary 404 can look like a genuine missing-release response
 - [GitLab Runner SSH cloning on self-hosted](docs/lessons/gitlab-runner-ssh-cloning-self-hosted.md) — helper image uses apk not apt-get; volume-mounted .ssh has wrong ownership; tagged runners ignore untagged jobs
+- [GitLab CI/CD Rust musl cross-compilation](docs/lessons/gitlab-cicd-rust-musl-cross-compilation.md) — use cargo-zigbuild on Docker runners and avoid YAML folding traps
+- [Clap subcommand changes must sync spawn args](docs/lessons/clap-subcommand-sync-spawn-args.md) — update every internal spawn site when a subcommand gains required children
 - [Stale daemon undermines fix verification](docs/lessons/stale-daemon-undermines-fix-verification.md) — probe coverage must equal the fault surface; verify the running instance is the fixed binary
 - [Proxy base URL must not carry /v1](docs/lessons/proxy-base-url-no-version-prefix.md) — forwarding concatenates base_url + client path; OpenAI-compatible clients already send /v1 in the path
 

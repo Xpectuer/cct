@@ -1,14 +1,14 @@
 ---
-title: "install.sh shows HTTP 404 due to user network issue blocking GitHub API"
+title: "An intercepted GitHub API request can look like a genuine release 404"
 doc_type: lesson
-brief: "install.sh reports HTTP 404 from GitHub API when the user's network cannot reach api.github.com; the error message is misleading — it suggests missing releases rather than a connectivity problem."
+brief: "A proxy or intermediary can return HTTP 404 for GitHub API traffic, which the installer cannot distinguish from a repository with no published release"
 confidence: verified
 created: 2026-03-12
-updated: 2026-03-12
-revision: 2
+updated: 2026-08-12
+revision: 3
 ---
 
-# install.sh shows HTTP 404 due to user network issue blocking GitHub API
+# An Intercepted GitHub API Request Can Look Like a Genuine Release 404
 
 ## Problem
 
@@ -23,13 +23,13 @@ https://api.github.com/repos/Xpectuer/cc_starter/releases/latest
 
 ## Root Cause
 
-The user's network could not reach `api.github.com`. The curl request to
-`/repos/{owner}/{repo}/releases/latest` returned HTTP 404 due to the network
-blocking or intercepting the connection, not because the repo lacked releases.
+The request path to `api.github.com` was blocked or intercepted. An intermediary returned
+HTTP 404 for `/repos/{owner}/{repo}/releases/latest`; the response did not prove that the
+repository lacked releases.
 
 ## Misleading Error Message
 
-`install.sh` (`fetch_latest`, line 47) captures the HTTP status code and includes it
+`install.sh` (`fetch_latest_github`) captures the HTTP status code and includes it
 verbatim in the error message. A network-level 404 is indistinguishable from a genuine
 "no releases published" 404, leading the error message to suggest the wrong fix
 (publish a release) when the real problem is connectivity.
@@ -42,8 +42,9 @@ Check network connectivity to `api.github.com` first:
 curl -sI https://api.github.com/
 ```
 
-If that fails, resolve the network issue (VPN, proxy, firewall, DNS) before retrying
-the installer.
+Also inspect the response headers and body. A normal GitHub API response identifies itself
+as GitHub and returns JSON; a proxy, firewall, captive portal, or mirror may return its own
+404 page. Resolve that network path before retrying the installer.
 
 ## Improvement Opportunity
 
@@ -60,4 +61,4 @@ Possible causes:
 
 | File | Location | Note |
 |------|----------|------|
-| `install.sh` | `fetch_latest` function, line 47–54 | Error message does not distinguish network failure from missing release |
+| `install.sh` | `fetch_latest_github` | Error message does not distinguish an intermediary 404 from a genuine missing-release 404 |
