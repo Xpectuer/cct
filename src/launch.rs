@@ -46,6 +46,9 @@ pub fn build_args(profile: &Profile, with_continue: bool) -> Vec<String> {
     if profile.skip_permissions.unwrap_or(false) {
         args.push("--dangerously-skip-permissions".to_string());
     }
+    if profile.worktree.unwrap_or(false) {
+        args.push("--worktree".to_string());
+    }
     if let Some(extra) = &profile.extra_args {
         args.extend(extra.iter().cloned());
     }
@@ -401,13 +404,21 @@ mod tests {
     use crate::config::Profile;
     use std::env;
 
-    fn profile(model: Option<&str>, skip: Option<bool>, extra: Option<Vec<&str>>) -> Profile {
+    /// Build a test profile. Parameter order mirrors `build_args` emission
+    /// order: model, skip_permissions, worktree, extra_args.
+    fn profile(
+        model: Option<&str>,
+        skip: Option<bool>,
+        worktree: Option<bool>,
+        extra: Option<Vec<&str>>,
+    ) -> Profile {
         Profile {
             name: "t".into(),
             description: None,
             env: None,
             model: model.map(Into::into),
             skip_permissions: skip,
+            worktree,
             extra_args: extra.map(|v| v.into_iter().map(Into::into).collect()),
             backend: crate::config::Backend::Claude,
             base_url: None,
@@ -488,20 +499,20 @@ mod tests {
 
     #[test]
     fn build_args_empty() {
-        assert!(build_args(&profile(None, None, None), false).is_empty());
+        assert!(build_args(&profile(None, None, None, None), false).is_empty());
     }
 
     #[test]
     fn build_args_model_only() {
         assert_eq!(
-            build_args(&profile(Some("claude-sonnet-4-6"), None, None), false),
+            build_args(&profile(Some("claude-sonnet-4-6"), None, None, None), false),
             vec!["--model", "claude-sonnet-4-6"]
         );
     }
 
     #[test]
     fn build_args_full() {
-        let p = profile(Some("opus"), Some(true), Some(vec!["--verbose"]));
+        let p = profile(Some("opus"), Some(true), None, Some(vec!["--verbose"]));
         assert_eq!(
             build_args(&p, false),
             vec![
@@ -516,20 +527,20 @@ mod tests {
     #[test]
     fn build_args_with_continue_false() {
         // Existing behavior preserved when with_continue=false
-        assert!(build_args(&profile(None, None, None), false).is_empty());
+        assert!(build_args(&profile(None, None, None, None), false).is_empty());
     }
 
     #[test]
     fn build_args_continue_only() {
         assert_eq!(
-            build_args(&profile(None, None, None), true),
+            build_args(&profile(None, None, None, None), true),
             vec!["--continue"]
         );
     }
 
     #[test]
     fn build_args_continue_with_flags() {
-        let p = profile(Some("opus"), Some(true), Some(vec!["--verbose"]));
+        let p = profile(Some("opus"), Some(true), None, Some(vec!["--verbose"]));
         assert_eq!(
             build_args(&p, true),
             vec![
@@ -540,6 +551,42 @@ mod tests {
                 "--verbose",
             ]
         );
+    }
+
+    #[test]
+    fn build_args_worktree_only() {
+        let p = profile(None, None, Some(true), None);
+        assert_eq!(build_args(&p, false), vec!["--worktree"]);
+    }
+
+    #[test]
+    fn build_args_worktree_false_and_none() {
+        // Opt-in only: Some(false) yields no flag...
+        let p = profile(None, None, Some(false), None);
+        assert!(build_args(&p, false).is_empty());
+        // ...and build_args_empty covers the None case as the regression guard.
+        assert!(build_args(&profile(None, None, None, None), false).is_empty());
+    }
+
+    #[test]
+    fn build_args_worktree_with_flags() {
+        let p = profile(Some("opus"), Some(true), Some(true), Some(vec!["--verbose"]));
+        assert_eq!(
+            build_args(&p, false),
+            vec![
+                "--model",
+                "opus",
+                "--dangerously-skip-permissions",
+                "--worktree",
+                "--verbose",
+            ]
+        );
+    }
+
+    #[test]
+    fn build_args_worktree_with_continue() {
+        let p = profile(None, None, Some(true), None);
+        assert_eq!(build_args(&p, true), vec!["--continue", "--worktree"]);
     }
 
     // --- Codex tests ---
@@ -557,6 +604,7 @@ mod tests {
             env: None,
             model: model.map(Into::into),
             skip_permissions: None,
+            worktree: None,
             extra_args: extra.map(|v| v.into_iter().map(Into::into).collect()),
             backend: crate::config::Backend::Codex,
             base_url: base_url.map(Into::into),

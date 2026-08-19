@@ -34,6 +34,7 @@ updated: 2026-08-05
   - `env: Option<HashMap<String, String>>` — Environment variables injected before exec.
   - `extra_args: Option<Vec<String>>` — Additional CLI arguments appended verbatim.
   - `skip_permissions: Option<bool>` — Claude-only. When `true`, adds `--dangerously-skip-permissions`.
+  - `worktree: Option<bool>` — Claude-only. When `true`, adds `--worktree` to the claude invocation. `worktree = true` on a codex profile is now rejected at validation — remove the key from codex profiles (previously the unknown key was silently ignored).
   - `auth_type: Option<String>` — Claude only. When `"token"`, uses `ANTHROPIC_AUTH_TOKEN` env var. Default `None` means `ANTHROPIC_API_KEY`.
   - `model: Option<String>` — Passed via `--model` for Claude; via `config.toml` for Codex.
   - Derives: `Debug`, `Deserialize`, `Clone`.

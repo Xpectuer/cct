@@ -77,6 +77,7 @@ name = "third-party"
 description = "Third-party Claude endpoint"
 model = "MiniMax-M2.1"                  # optional — maps to --model
 skip_permissions = false            # optional — adds --dangerously-skip-permissions
+worktree = false              # optional — adds --worktree (see docs/modules/launch.md for caveats)
 auth_type = "token"                 # optional — "token" uses ANTHROPIC_AUTH_TOKEN instead of ANTHROPIC_API_KEY
 extra_args = ["--verbose"]          # optional — appended verbatim
 

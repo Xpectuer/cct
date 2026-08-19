@@ -41,6 +41,7 @@ name = "test-profile"
 description = "A test profile"
 model = "test-model"
 skip_permissions = true
+worktree = true
 extra_args = ["--verbose", "--debug"]
 
 [profiles.env]
@@ -57,6 +58,7 @@ MY_VAR = "my_value"
     assert_eq!(p.description.as_deref(), Some("A test profile"));
     assert_eq!(p.model.as_deref(), Some("test-model"));
     assert_eq!(p.skip_permissions, Some(true));
+    assert_eq!(p.worktree, Some(true));
     assert_eq!(
         p.extra_args.as_deref(),
         Some(&["--verbose".to_string(), "--debug".to_string()][..])
@@ -75,6 +77,7 @@ fn build_args_ordering() {
         env: None,
         model: Some("opus".into()),
         skip_permissions: Some(true),
+        worktree: None,
         extra_args: Some(vec!["--verbose".into(), "--debug".into()]),
         backend: cct::config::Backend::Claude,
         base_url: None,
@@ -104,6 +107,7 @@ fn build_args_empty_profile() {
         env: None,
         model: None,
         skip_permissions: None,
+        worktree: None,
         extra_args: None,
         backend: cct::config::Backend::Claude,
         base_url: None,
@@ -112,6 +116,37 @@ fn build_args_empty_profile() {
     };
     let args = launch::build_args(&profile, false);
     assert!(args.is_empty());
+}
+
+// --- Test 3b: build_args worktree ordering ---
+
+#[test]
+fn build_args_worktree_ordering() {
+    let profile = Profile {
+        name: "worktree".into(),
+        description: None,
+        env: None,
+        model: Some("opus".into()),
+        skip_permissions: Some(true),
+        worktree: Some(true),
+        extra_args: Some(vec!["--verbose".into(), "--debug".into()]),
+        backend: cct::config::Backend::Claude,
+        base_url: None,
+        full_auto: None,
+        auth_type: None,
+    };
+    let args = launch::build_args(&profile, false);
+    assert_eq!(
+        args,
+        vec![
+            "--model",
+            "opus",
+            "--dangerously-skip-permissions",
+            "--worktree",
+            "--verbose",
+            "--debug"
+        ]
+    );
 }
 
 // --- Test 4: exec full profile via fake binary ---
@@ -149,6 +184,39 @@ extra_args = ["--verbose"]
         captured,
         "--model test-model --dangerously-skip-permissions --verbose"
     );
+}
+
+// --- Test 4b: exec worktree profile via fake binary ---
+
+#[test]
+fn exec_worktree_profile_fake_binary() {
+    let toml = r#"
+[[profiles]]
+name = "fake-worktree"
+model = "test-model"
+worktree = true
+"#;
+    let toml_file = write_temp_toml(toml);
+    let args_file = tempfile::NamedTempFile::new().expect("create args temp");
+    let args_path = args_file.path().to_str().unwrap().to_string();
+
+    let output = run_exec_profile(vec![
+        (
+            "CCT_TEST_TOML",
+            toml_file.path().to_str().unwrap().to_string(),
+        ),
+        ("CCT_TEST_ARGS_FILE", args_path.clone()),
+        ("PATH", prepend_path(&helpers_dir())),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "exec_profile failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let captured = std::fs::read_to_string(&args_path).expect("read args file");
+    assert_eq!(captured, "--model test-model --worktree");
 }
 
 // --- Test 5: exec env injection ---

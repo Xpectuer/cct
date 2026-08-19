@@ -70,7 +70,7 @@ updated: 2026-07-17
 ## 2. Dependency Graph
 
 - **Imports from `crate::app`** — uses `App`, `AppMode`, `FormState`, `FIELD_LABELS`, `field_labels`, and `Backend`. `field_labels(&form.backend)` is called dynamically inside `build_form_lines` to select the correct label set per backend.
-- **Imports from `crate::config`** — uses the `Profile` struct (fields: `name`, `description`, `model`, `skip_permissions`, `extra_args`, `env`) to build detail lines; `Profile` is passed by reference through `App`.
+- **Imports from `crate::config`** — uses the `Profile` struct (fields: `name`, `description`, `model`, `skip_permissions`, `worktree`, `extra_args`, `env`) to build detail lines; `Profile` is passed by reference through `App`.
 - **Imports from `ratatui`** (external crate, not a project module):
   - `layout::{Constraint, Direction, Layout}` — geometric splitting of the terminal area.
   - `style::{Color, Modifier, Style}` — color and bold styling for highlight, form active-field, and footer.
@@ -133,6 +133,10 @@ When a profile has a `description`, its `ListItem` is formatted as `"{name}\n  {
 ### skip_permissions Display
 
 `skip_permissions` is only rendered when explicitly set to `true`. A value of `false` or `None` produces no output in the detail panel — absence of the line means "not set / false".
+
+### worktree Display
+
+`worktree` is rendered only when explicitly set to `true`. A value of `false` or `None` produces no line — absence means 'not set / false'.
 <!-- END:edge_cases -->
 
 ---
