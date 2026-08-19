@@ -111,6 +111,7 @@ pub struct Profile {
     pub env: Option<HashMap<String, String>>,
     pub extra_args: Option<Vec<String>>,
     pub skip_permissions: Option<bool>,
+    pub worktree: Option<bool>,
     pub model: Option<String>,
     #[serde(default)]
     pub backend: Backend,
@@ -144,6 +145,7 @@ name = "default"
 description = "Default Claude Code"
 # model = "claude-opus-5"
 # skip_permissions = false
+# worktree = false
 # extra_args = []
 
 # [profiles.env]
@@ -196,6 +198,12 @@ pub fn validate_profiles(profiles: &[Profile]) -> Result<()> {
         if p.backend == Backend::Codex && p.skip_permissions.unwrap_or(false) {
             anyhow::bail!(
                 "Profile {:?}: codex backend does not support skip_permissions",
+                p.name
+            );
+        }
+        if p.backend == Backend::Codex && p.worktree.unwrap_or(false) {
+            anyhow::bail!(
+                "Profile {:?}: codex backend does not support worktree",
                 p.name
             );
         }
@@ -438,6 +446,12 @@ pub fn update_profile(original_name: &str, updated: &NewProfile) -> Result<()> {
             entry["backend"] = value("codex");
             entry.remove("description");
             entry.remove("max_context_size");
+            if entry.get("skip_permissions").and_then(Item::as_bool) == Some(true) {
+                entry.remove("skip_permissions");
+            }
+            if entry.get("worktree").and_then(Item::as_bool) == Some(true) {
+                entry.remove("worktree");
+            }
             set_optional_string(
                 entry,
                 "full_auto",
@@ -721,6 +735,21 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
         assert_eq!(cfg.profiles[0].name, "default");
         assert!(cfg.profiles[0].description.is_none());
         assert!(cfg.profiles[0].env.is_none());
+    }
+
+    #[test]
+    fn parse_profile_with_worktree() {
+        let cfg: Config =
+            toml::from_str("[[profiles]]\nname = \"w\"\nworktree = true").unwrap();
+        assert_eq!(cfg.profiles[0].worktree, Some(true));
+
+        let cfg: Config =
+            toml::from_str("[[profiles]]\nname = \"w\"\nworktree = false").unwrap();
+        assert_eq!(cfg.profiles[0].worktree, Some(false));
+
+        // Minimal entry without the key deserializes to None.
+        let cfg: Config = toml::from_str("[[profiles]]\nname = \"w\"").unwrap();
+        assert_eq!(cfg.profiles[0].worktree, None);
     }
 
     #[test]
@@ -1179,6 +1208,7 @@ base_url = "https://api.example.com/v1"
             env: None,
             extra_args: None,
             skip_permissions: Some(true),
+            worktree: None,
             model: None,
             backend: Backend::Codex,
             base_url: None,
@@ -1195,6 +1225,63 @@ base_url = "https://api.example.com/v1"
     }
 
     #[test]
+    fn validate_profiles_rejects_codex_worktree() {
+        // Negative: codex + worktree = true is rejected, naming profile and key.
+        let profiles = vec![Profile {
+            name: "bad-codex".into(),
+            description: None,
+            env: None,
+            extra_args: None,
+            skip_permissions: None,
+            worktree: Some(true),
+            model: None,
+            backend: Backend::Codex,
+            base_url: None,
+            full_auto: None,
+            auth_type: None,
+        }];
+        let result = validate_profiles(&profiles);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("worktree") && msg.contains("bad-codex"),
+            "Error should name the profile and 'worktree', got: {msg}"
+        );
+
+        // Positive control: claude + worktree = true is legal.
+        let profiles = vec![Profile {
+            name: "good-claude".into(),
+            description: None,
+            env: None,
+            extra_args: None,
+            skip_permissions: None,
+            worktree: Some(true),
+            model: None,
+            backend: Backend::Claude,
+            base_url: None,
+            full_auto: None,
+            auth_type: None,
+        }];
+        assert!(validate_profiles(&profiles).is_ok());
+
+        // worktree = false on codex remains legal.
+        let profiles = vec![Profile {
+            name: "ok-codex".into(),
+            description: None,
+            env: None,
+            extra_args: None,
+            skip_permissions: None,
+            worktree: Some(false),
+            model: None,
+            backend: Backend::Codex,
+            base_url: None,
+            full_auto: None,
+            auth_type: None,
+        }];
+        assert!(validate_profiles(&profiles).is_ok());
+    }
+
+    #[test]
     fn validate_profiles_rejects_claude_full_auto() {
         let profiles = vec![Profile {
             name: "bad-claude".into(),
@@ -1202,6 +1289,7 @@ base_url = "https://api.example.com/v1"
             env: None,
             extra_args: None,
             skip_permissions: None,
+            worktree: None,
             model: None,
             backend: Backend::Claude,
             base_url: None,
@@ -1392,6 +1480,100 @@ OPENAI_API_KEY = "sk-old"
                 .map(String::as_str),
             Some("sk-new")
         );
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn update_profile_preserves_worktree() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, "[[profiles]]\nname = \"w\"\nworktree = true\n").unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let updated = NewProfile {
+            name: "w".into(),
+            description: Some("Edited".into()),
+            base_url: None,
+            api_key: None,
+            model: None,
+            fast_model: None,
+            backend: Backend::Claude,
+            full_auto: None,
+            auth_type: None,
+        };
+        update_profile("w", &updated).unwrap();
+
+        let profiles = load_profiles().unwrap();
+        assert_eq!(profiles[0].worktree, Some(true));
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn update_profile_removes_claude_only_flags_when_target_is_codex() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let codex = NewProfile {
+            name: "w".into(),
+            description: None,
+            base_url: Some("https://new.example/v1".into()),
+            api_key: Some("sk-new".into()),
+            model: Some("gpt-5.4".into()),
+            fast_model: None,
+            backend: Backend::Codex,
+            full_auto: Some(ApprovalLevel::Danger),
+            auth_type: None,
+        };
+
+        // Phase (a): a Claude entry carrying the rejected true values written
+        // as Codex — both claude-only keys are stripped and the config reloads.
+        std::fs::write(
+            &path,
+            "[[profiles]]\nname = \"w\"\nbackend = \"claude\"\n\
+             worktree = true\nskip_permissions = true\n",
+        )
+        .unwrap();
+        update_profile("w", &codex).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !content.contains("worktree"),
+            "worktree should be stripped, got:\n{content}"
+        );
+        assert!(
+            !content.contains("skip_permissions"),
+            "skip_permissions should be stripped, got:\n{content}"
+        );
+        let profiles = load_profiles().unwrap();
+        assert_eq!(profiles[0].backend, Backend::Codex);
+        assert_eq!(profiles[0].worktree, None);
+        assert_eq!(profiles[0].skip_permissions, None);
+
+        // Phase (b): legal `false` keys are preserved by the Some(true) gate.
+        std::fs::write(
+            &path,
+            "[[profiles]]\nname = \"w\"\nbackend = \"claude\"\n\
+             worktree = false\nskip_permissions = false\n",
+        )
+        .unwrap();
+        update_profile("w", &codex).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            content.contains("worktree = false"),
+            "worktree = false should be preserved, got:\n{content}"
+        );
+        assert!(
+            content.contains("skip_permissions = false"),
+            "skip_permissions = false should be preserved, got:\n{content}"
+        );
+        let profiles = load_profiles().unwrap();
+        assert_eq!(profiles[0].backend, Backend::Codex);
+        assert_eq!(profiles[0].worktree, Some(false));
+        assert_eq!(profiles[0].skip_permissions, Some(false));
 
         std::env::remove_var("CCT_CONFIG");
     }
@@ -1791,6 +1973,7 @@ description = "Second profile"
             env: None,
             extra_args: None,
             skip_permissions: None,
+            worktree: None,
             model: None,
             backend: Backend::Claude,
             base_url: None,

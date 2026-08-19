@@ -100,7 +100,7 @@ graph TD
 ### config module (`src/config.rs`)
 
 - `enum Backend` — `Claude` (default) | `Codex`; serde rename lowercase; used in `Profile`, `NewProfile`, `App`, `FormState`, `launch`
-- `struct Profile` — deserialized profile (name, description, backend, base_url, full_auto, model, skip_permissions, extra_args, env)
+- `struct Profile` — deserialized profile (name, description, backend, base_url, full_auto, model, skip_permissions, worktree, extra_args, env)
 - `struct NewProfile` — input for profile creation (name, description, base_url, api_key, model, backend, full_auto)
 - `fn config_path() -> PathBuf` — resolves config file path (`CCT_CONFIG` env var → XDG dirs)
 - `fn ensure_default_config() -> Result<()>` — creates default TOML on first run (idempotent)

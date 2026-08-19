@@ -223,6 +223,9 @@ fn build_detail(profile: &Profile) -> Vec<Line<'static>> {
             if profile.skip_permissions.unwrap_or(false) {
                 lines.push(Line::from("skip_permissions: \u{2713}"));
             }
+            if profile.worktree.unwrap_or(false) {
+                lines.push(Line::from("worktree: \u{2713}"));
+            }
             if profile.auth_type.as_deref() == Some("token") {
                 lines.push(Line::from("auth: token"));
             }
@@ -500,6 +503,7 @@ mod tests {
             env: None,
             model: Some("o3".into()),
             skip_permissions: None,
+            worktree: None,
             extra_args: None,
             backend: Backend::Codex,
             base_url: Some("https://api.openai.com".into()),
@@ -531,6 +535,7 @@ mod tests {
             env: None,
             model: None,
             skip_permissions: Some(true),
+            worktree: None,
             extra_args: None,
             backend: Backend::Claude,
             base_url: None,
@@ -555,6 +560,83 @@ mod tests {
     }
 
     #[test]
+    fn detail_panel_shows_worktree_for_claude() {
+        use crate::config::Backend;
+
+        // Claude + worktree = true shows the line.
+        let claude_profile = Profile {
+            name: "worktree-test".into(),
+            description: None,
+            env: None,
+            model: None,
+            skip_permissions: None,
+            worktree: Some(true),
+            extra_args: None,
+            backend: Backend::Claude,
+            base_url: None,
+            full_auto: None,
+            auth_type: None,
+        };
+        let joined: String = build_detail(&claude_profile)
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("worktree: \u{2713}"),
+            "Expected 'worktree: ✓' in claude detail, got:\n{joined}"
+        );
+
+        // Claude + None shows no worktree line.
+        let none_profile = Profile {
+            name: "no-worktree".into(),
+            description: None,
+            env: None,
+            model: None,
+            skip_permissions: None,
+            worktree: None,
+            extra_args: None,
+            backend: Backend::Claude,
+            base_url: None,
+            full_auto: None,
+            auth_type: None,
+        };
+        let joined: String = build_detail(&none_profile)
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !joined.contains("worktree:"),
+            "Should NOT show 'worktree:' for None, got:\n{joined}"
+        );
+
+        // Codex profile (Some(true) is unreachable via validation — defense).
+        let codex_profile = Profile {
+            name: "codex-worktree".into(),
+            description: None,
+            env: None,
+            model: None,
+            skip_permissions: None,
+            worktree: Some(true),
+            extra_args: None,
+            backend: Backend::Codex,
+            base_url: None,
+            full_auto: None,
+            auth_type: None,
+        };
+        let joined: String = build_detail(&codex_profile)
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !joined.contains("worktree:"),
+            "Should NOT show 'worktree:' for codex profile, got:\n{joined}"
+        );
+    }
+
+    #[test]
     fn skip_permissions_profile_has_red_style() {
         let profile = Profile {
             name: "dangerous".into(),
@@ -562,6 +644,7 @@ mod tests {
             env: None,
             model: None,
             skip_permissions: Some(true),
+            worktree: None,
             extra_args: None,
             backend: crate::config::Backend::Claude,
             base_url: None,
@@ -583,6 +666,7 @@ mod tests {
             env: None,
             model: None,
             skip_permissions: Some(false),
+            worktree: None,
             extra_args: None,
             backend: crate::config::Backend::Claude,
             base_url: None,
@@ -703,6 +787,7 @@ mod tests {
             env: None,
             model: None,
             skip_permissions: None,
+            worktree: None,
             extra_args: None,
             backend: crate::config::Backend::Claude,
             base_url: None,
@@ -729,6 +814,7 @@ mod tests {
             env: None,
             model: None,
             skip_permissions: None,
+            worktree: None,
             extra_args: None,
             backend: crate::config::Backend::Claude,
             base_url: None,
@@ -755,6 +841,7 @@ mod tests {
             env: None,
             model: None,
             skip_permissions: None,
+            worktree: None,
             extra_args: None,
             backend: crate::config::Backend::Codex,
             base_url: None,
@@ -781,6 +868,7 @@ mod tests {
             env: None,
             model: None,
             skip_permissions: None,
+            worktree: None,
             extra_args: None,
             backend: crate::config::Backend::Codex,
             base_url: None,

@@ -148,6 +148,8 @@ None — all public surface is functions. The module consumes `crate::config::Pr
 
 - **Editor fallback**: `open_editor` defaults to `"vi"` when `$EDITOR` is unset. There is no validation that `vi` exists on the system; a missing `vi` will produce an `Err` with the context message `spawn editor "vi"`.
 - **`--dangerously-skip-permissions` flag**: Only appended when `profile.skip_permissions` is explicitly `Some(true)`. A missing field (`None`) is treated identically to `Some(false)` via `unwrap_or(false)`.
+- **`--worktree` flag**: appended only when `profile.worktree` is explicitly `Some(true)`. A missing field (`None`) is treated identically to `Some(false)` via `unwrap_or(false)`.
+- **`--worktree` requires a recent claude**: `worktree = true` needs a claude version that supports `--worktree` (recent 2.x; older binaries reject the flag at launch).
 
 ### Error Handling Quirks
 
@@ -161,9 +163,17 @@ The ordering of arguments appended by `build_args` is deterministic and tested:
 1. `--continue` (flag, only when `with_continue=true`) — must be first
 2. `--model <value>` (positional pair, only when `model` is `Some`)
 3. `--dangerously-skip-permissions` (flag, only when `skip_permissions` is `Some(true)`)
-4. Elements of `extra_args` in their original TOML order (appended verbatim)
+4. `--worktree` (flag, only when `worktree` is `Some(true)`)
+5. Elements of `extra_args` in their original TOML order (appended verbatim)
 
-Callers must not assume any other ordering. Unit tests pin this contract: `build_args_empty`, `build_args_model_only`, `build_args_full`, `build_args_continue_only`, `build_args_continue_with_flags`.
+Callers must not assume any other ordering. Unit tests pin this contract: `build_args_empty`, `build_args_model_only`, `build_args_full`, `build_args_continue_only`, `build_args_continue_with_flags`, `build_args_worktree_only`, `build_args_worktree_with_flags`, `build_args_worktree_with_continue`.
+
+### `--worktree` Notes (observed with claude 2.1.227)
+
+- (a) `--continue` + `--worktree` are both passed unconditionally — cct does not filter. Observed: the combination parses and still creates a worktree; claude then errors with `No deferred tool marker found in the resumed session` when the session was never deferred — the error is about resume state, not the flags.
+- (b) `--worktree` takes an optional name value: with `worktree = true`, a leading non-flag token in `extra_args` is consumed by claude as the worktree name — keep `extra_args` flag-only on worktree profiles. Do **not** also place `--worktree` in `extra_args` on a `worktree = true` profile — the flag is passed twice (observed: duplicate `--worktree --worktree feature-auth` is not rejected at parse; the second flag's value is consumed as the name and a worktree named `feature-auth` is created). To name a worktree, use `extra_args = ["--worktree", "<name>"]` only on profiles **without** `worktree = true`. Do not "fix" this by reordering `--worktree` after `extra_args` — that only shifts the ambiguity onto claude's positional handling.
+- (c) each launch with `worktree = true` creates a new git worktree (observed: created under `.claude/worktrees/`, e.g. `.claude/worktrees/agile-pondering-pie`, shown as `locked` in `git worktree list`); cct does not clean up; remove stale ones with `git worktree remove <name>` / `git worktree prune`.
+- (d) worktree isolation is filesystem-level only — git worktrees share refs and objects with the main checkout, and `--worktree` does not restrict shell access; combined with `skip_permissions = true` the session retains full shell access to the repository.
 
 ### Unix-Only Constraint
 
@@ -218,6 +228,7 @@ let profile = Profile {
     description: Some("Production endpoint".into()),
     model: Some("claude-opus-4-6".into()),
     skip_permissions: Some(false),
+    worktree: None,
     extra_args: Some(vec!["--verbose".into()]),
     env: Some([
         ("ANTHROPIC_BASE_URL".into(), "https://api.example.com".into()),

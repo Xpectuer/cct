@@ -210,6 +210,7 @@ User presses [e]
 | `profiles[].full_auto = true` | Codex-only. Adds `--full-auto` to codex invocation. |
 | `profiles[].model` | Claude: adds `--model <value>`. Codex: passed to the proxy as the upstream model (not a CLI arg). |
 | `profiles[].skip_permissions = true` | Claude-only. Adds `--dangerously-skip-permissions` to `claude` invocation. |
+| `profiles[].worktree = true` | Claude-only. Adds --worktree to the claude invocation. |
 | `profiles[].auth_type = "token"` | Claude-only. Uses `ANTHROPIC_AUTH_TOKEN` env var instead of `ANTHROPIC_API_KEY`. Toggle via `t` key or `cct add --auth-type token`. |
 | `profiles[].extra_args = [...]` | Appended verbatim after other flags |
 | `profiles[].env.*` | Injected as process environment variables before exec |
