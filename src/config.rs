@@ -2188,11 +2188,7 @@ ANTHROPIC_API_KEY = "sk-secret"
     fn update_profile_wire_api_set_and_remove() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("profiles.toml");
-        std::fs::write(
-            &path,
-            "[[profiles]]\nname = \"w\"\nbackend = \"codex\"\n",
-        )
-        .unwrap();
+        std::fs::write(&path, "[[profiles]]\nname = \"w\"\nbackend = \"codex\"\n").unwrap();
         std::env::set_var("CCT_CONFIG", &path);
 
         // Set chat.

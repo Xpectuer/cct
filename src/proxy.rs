@@ -572,7 +572,11 @@ async fn handle_chat_gateway(
             // responses event sequence; anything unparseable passes through.
             let bytes = upstream_resp.bytes().await.unwrap_or_default();
             if let Ok(completion) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-                if completion.get("choices").and_then(|c| c.as_array()).is_some() {
+                if completion
+                    .get("choices")
+                    .and_then(|c| c.as_array())
+                    .is_some()
+                {
                     log_proxy!("<< upstream 200 (non-stream completion → responses)");
                     let mut payload = String::new();
                     for ev in translate::ChatSseTranslator::from_chat_completion(&completion) {
@@ -631,16 +635,15 @@ where
                 let out = translate_chat_chunk(&mut this.decoder, &mut this.translator, &chunk);
                 Poll::Ready(Some(Ok(Frame::data(Bytes::from(out)))))
             }
-            Poll::Ready(Some(Err(e))) => {
-                Poll::Ready(Some(Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>)))
-            }
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(
+                Box::new(e) as Box<dyn std::error::Error + Send + Sync>
+            ))),
             Poll::Ready(None) => {
                 if this.flushed {
                     Poll::Ready(None)
                 } else {
                     this.flushed = true;
-                    let out =
-                        chat_gateway_final_frames(&mut this.decoder, &mut this.translator);
+                    let out = chat_gateway_final_frames(&mut this.decoder, &mut this.translator);
                     Poll::Ready(Some(Ok(Frame::data(Bytes::from(out)))))
                 }
             }
@@ -966,7 +969,10 @@ mod tests {
         let cmd: ControlCommand = serde_json::from_str(json).unwrap();
         assert_eq!(cmd.cmd, "status");
         assert!(cmd.base_url.is_none());
-        assert!(cmd.wire_api.is_none(), "absent wire_api must default to None");
+        assert!(
+            cmd.wire_api.is_none(),
+            "absent wire_api must default to None"
+        );
     }
 
     #[test]
@@ -1381,7 +1387,10 @@ mod tests {
         let mut d = SseFrameDecoder::new();
         let frames = d.push(b"data: line1\ndata: line2\n\n");
         assert_eq!(frames, vec!["line1\nline2".to_string()]);
-        assert!(d.push(b"\n\n").is_empty(), "blank-only frame yields nothing");
+        assert!(
+            d.push(b"\n\n").is_empty(),
+            "blank-only frame yields nothing"
+        );
         assert!(d.flush().is_empty());
     }
 

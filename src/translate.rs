@@ -72,9 +72,10 @@ pub fn responses_to_chat_request(body: &Value) -> Value {
                         messages.push(msg);
                         last_emitted_role = Some("assistant");
                     } else {
-                        let msg = if let Some(img) = parts.iter().find(|p| {
-                            p.get("type").and_then(|t| t.as_str()) == Some("input_image")
-                        }) {
+                        let msg = if let Some(img) = parts
+                            .iter()
+                            .find(|p| p.get("type").and_then(|t| t.as_str()) == Some("input_image"))
+                        {
                             let url = img
                                 .get("image_url")
                                 .and_then(|u| u.get("url"))
@@ -123,10 +124,7 @@ pub fn responses_to_chat_request(body: &Value) -> Value {
                         .last()
                         .map(|last| {
                             last.get("role").and_then(|r| r.as_str()) == Some("assistant")
-                                && last
-                                    .get("content")
-                                    .map(|c| c.is_null())
-                                    .unwrap_or(false)
+                                && last.get("content").map(|c| c.is_null()).unwrap_or(false)
                                 && last.get("tool_calls").is_some()
                         })
                         .unwrap_or(false);
@@ -167,10 +165,7 @@ pub fn responses_to_chat_request(body: &Value) -> Value {
                                     items
                                         .iter()
                                         .map(|part| {
-                                            match part
-                                                .get("type")
-                                                .and_then(|t| t.as_str())
-                                            {
+                                            match part.get("type").and_then(|t| t.as_str()) {
                                                 Some("output_image") | Some("input_image") => {
                                                     let url = part
                                                         .get("image_url")
@@ -234,9 +229,10 @@ pub fn responses_to_chat_request(body: &Value) -> Value {
                     }
                     // Attach to the previous assistant message; with none yet,
                     // hold it for the next assistant/function_call message.
-                    if let Some(idx) = messages.iter().rposition(|m| {
-                        m.get("role").and_then(|r| r.as_str()) == Some("assistant")
-                    }) {
+                    if let Some(idx) = messages
+                        .iter()
+                        .rposition(|m| m.get("role").and_then(|r| r.as_str()) == Some("assistant"))
+                    {
                         merge_reasoning(&mut messages[idx], &text);
                     } else {
                         pending_reasoning = Some(match pending_reasoning.take() {
@@ -409,9 +405,8 @@ impl ChatSseTranslator {
                         .to_string(),
                     );
                 }
-                events.push(
-                    json!({"type": "response.output_text.delta", "delta": part}).to_string(),
-                );
+                events
+                    .push(json!({"type": "response.output_text.delta", "delta": part}).to_string());
                 self.assistant_text = Some(match self.assistant_text.take() {
                     Some(prev) => prev + &part,
                     None => part,
@@ -434,11 +429,14 @@ impl ChatSseTranslator {
                         self.tool_call_index_by_id.insert(id.to_string(), index);
                     }
                 }
-                let entry = self.tool_calls.entry(index).or_insert_with(|| ToolCallState {
-                    id: String::new(),
-                    name: String::new(),
-                    arguments: String::new(),
-                });
+                let entry = self
+                    .tool_calls
+                    .entry(index)
+                    .or_insert_with(|| ToolCallState {
+                        id: String::new(),
+                        name: String::new(),
+                        arguments: String::new(),
+                    });
                 if entry.id.is_empty() {
                     if let Some(id) = tc.get("id").and_then(|i| i.as_str()) {
                         entry.id = id.to_string();
@@ -525,34 +523,30 @@ impl ChatSseTranslator {
 
     fn flush_reasoning_done(&mut self) -> Vec<String> {
         match self.reasoning_text.take() {
-            Some(text) => vec![
-                json!({
-                    "type": "response.output_item.done",
-                    "item": {
-                        "type": "reasoning",
-                        "summary": [],
-                        "content": [{"type": "reasoning_text", "text": text}]
-                    }
-                })
-                .to_string(),
-            ],
+            Some(text) => vec![json!({
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "reasoning",
+                    "summary": [],
+                    "content": [{"type": "reasoning_text", "text": text}]
+                }
+            })
+            .to_string()],
             None => Vec::new(),
         }
     }
 
     fn flush_message_done(&mut self) -> Vec<String> {
         match self.assistant_text.take() {
-            Some(text) => vec![
-                json!({
-                    "type": "response.output_item.done",
-                    "item": {
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [{"type": "output_text", "text": text}]
-                    }
-                })
-                .to_string(),
-            ],
+            Some(text) => vec![json!({
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": text}]
+                }
+            })
+            .to_string()],
             None => Vec::new(),
         }
     }
@@ -855,7 +849,10 @@ mod tests {
             ]}]
         });
         let messages = messages_of(&body);
-        assert_eq!(messages[1], json!({"role": "user", "content": "Hello world"}));
+        assert_eq!(
+            messages[1],
+            json!({"role": "user", "content": "Hello world"})
+        );
     }
 
     #[test]
@@ -871,7 +868,10 @@ mod tests {
         let messages = messages_of(&body);
         assert_eq!(messages.len(), 3, "system + 2 assistant messages");
         assert_eq!(messages[1], json!({"role": "assistant", "content": "same"}));
-        assert_eq!(messages[2], json!({"role": "assistant", "content": "different"}));
+        assert_eq!(
+            messages[2],
+            json!({"role": "assistant", "content": "different"})
+        );
     }
 
     #[test]
@@ -1097,7 +1097,12 @@ mod tests {
             "input": []
         });
         let out = responses_to_chat_request(&body);
-        let mut keys: Vec<&str> = out.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        let mut keys: Vec<&str> = out
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|k| k.as_str())
+            .collect();
         keys.sort_unstable();
         assert_eq!(keys, vec!["messages", "model", "stream", "stream_options"]);
         assert_eq!(out["stream"], true);
@@ -1132,7 +1137,8 @@ mod tests {
     fn sse_text_stream_event_sequence() {
         let mut t = ChatSseTranslator::new();
         let mut events: Vec<String> = Vec::new();
-        events.extend(t.feed(r#"{"id":"cmpl-1","choices":[{"index":0,"delta":{"content":"Hel"}}]}"#));
+        events
+            .extend(t.feed(r#"{"id":"cmpl-1","choices":[{"index":0,"delta":{"content":"Hel"}}]}"#));
         events.extend(t.feed(r#"{"choices":[{"index":0,"delta":{"content":"lo"}}]}"#));
         events.extend(t.feed(r#"{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#));
         events.extend(t.finish());
@@ -1210,15 +1216,18 @@ mod tests {
                 {"index":0,"function":{"arguments":"{\"city\":\"SF\"}"}}
             ]}}]}"#,
         ));
-        events.extend(t.feed(
-            r#"{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#,
-        ));
+        events
+            .extend(t.feed(r#"{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#));
         events.extend(t.finish());
 
         // No events during buffering; only the two done events at the end.
         assert_eq!(
             event_types(&events),
-            vec!["response.output_item.done", "response.output_item.done", "response.completed"]
+            vec![
+                "response.output_item.done",
+                "response.output_item.done",
+                "response.completed"
+            ]
         );
         assert_eq!(
             parse(&events[0])["item"],
@@ -1251,9 +1260,8 @@ mod tests {
                 {"index":0,"function":{"name":"f","arguments":"{}"}}
             ]}}]}"#,
         ));
-        events.extend(t.feed(
-            r#"{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#,
-        ));
+        events
+            .extend(t.feed(r#"{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#));
         assert_eq!(events.len(), 1);
         assert_eq!(parse(&events[0])["item"]["call_id"], "tool-call-0");
     }
@@ -1263,12 +1271,20 @@ mod tests {
         let mut t = ChatSseTranslator::new();
         let mut events: Vec<String> = Vec::new();
         events.extend(t.feed(r#"{"choices":[{"index":0,"delta":{"content":"partial"}}]}"#));
-        events.extend(t.feed(
-            r#"{"choices":[{"index":0,"delta":{},"finish_reason":"length"}]}"#,
-        ));
-        assert_eq!(event_types(&events), vec!["response.output_item.added", "response.output_text.delta", "response.failed"]);
+        events.extend(t.feed(r#"{"choices":[{"index":0,"delta":{},"finish_reason":"length"}]}"#));
+        assert_eq!(
+            event_types(&events),
+            vec![
+                "response.output_item.added",
+                "response.output_text.delta",
+                "response.failed"
+            ]
+        );
         let failed = parse(&events[2]);
-        assert_eq!(failed["response"]["error"]["code"], "context_length_exceeded");
+        assert_eq!(
+            failed["response"]["error"]["code"],
+            "context_length_exceeded"
+        );
         // Terminal state: finish() must emit nothing further.
         assert!(t.finish().is_empty());
         assert!(t.feed("[DONE]").is_empty());
@@ -1278,11 +1294,17 @@ mod tests {
     fn sse_done_without_finish_reason_flushed_by_finish() {
         let mut t = ChatSseTranslator::new();
         let mut events: Vec<String> = Vec::new();
-        events.extend(t.feed(r#"{"id":"cmpl-2","choices":[{"index":0,"delta":{"content":"hi"}}]}"#));
+        events
+            .extend(t.feed(r#"{"id":"cmpl-2","choices":[{"index":0,"delta":{"content":"hi"}}]}"#));
         events.extend(t.feed("[DONE]"));
         assert_eq!(
             event_types(&events),
-            vec!["response.output_item.added", "response.output_text.delta", "response.output_item.done", "response.completed"]
+            vec![
+                "response.output_item.added",
+                "response.output_text.delta",
+                "response.output_item.done",
+                "response.completed"
+            ]
         );
         assert_eq!(parse(&events[3])["response"]["id"], "cmpl-2");
     }
@@ -1334,10 +1356,7 @@ mod tests {
         );
         assert_eq!(parse(&events[1])["delta"], "a");
         assert_eq!(parse(&events[2])["delta"], "b");
-        assert_eq!(
-            parse(&events[3])["item"]["content"][0]["text"],
-            "ab"
-        );
+        assert_eq!(parse(&events[3])["item"]["content"][0]["text"], "ab");
     }
 
     // ── non-streamed completion ───────────────────────────────────────────

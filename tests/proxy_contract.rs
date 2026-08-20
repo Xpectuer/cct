@@ -662,9 +662,8 @@ fn chat_gateway_translation() {
         1,
         "stub must record exactly one body, got {bodies:?}"
     );
-    let chat: serde_json::Value = serde_json::from_str(&bodies[0]).unwrap_or_else(|e| {
-        panic!("stub body must be valid JSON — got: {:?} ({e})", bodies[0])
-    });
+    let chat: serde_json::Value = serde_json::from_str(&bodies[0])
+        .unwrap_or_else(|e| panic!("stub body must be valid JSON — got: {:?} ({e})", bodies[0]));
     assert_eq!(
         chat["messages"][0],
         serde_json::json!({"role": "system", "content": "sys"}),
