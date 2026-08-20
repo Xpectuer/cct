@@ -119,6 +119,10 @@ pub struct Profile {
     pub full_auto: Option<ApprovalLevel>,
     #[serde(default)]
     pub auth_type: Option<String>,
+    /// Codex-only: "responses" (default, pass-through) or "chat" (proxy
+    /// translates /v1/responses ↔ /v1/chat/completions for the upstream).
+    #[serde(default)]
+    pub wire_api: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -186,6 +190,7 @@ pub fn ensure_codex_profile() -> Result<()> {
             backend: Backend::Codex,
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         })?;
     }
     Ok(())
@@ -208,6 +213,31 @@ pub fn validate_profiles(profiles: &[Profile]) -> Result<()> {
         if p.backend == Backend::Claude && p.auth_type.as_deref() == Some("subscription") {
             anyhow::bail!(
                 "Profile {:?}: claude backend does not support auth_type = \"subscription\"",
+                p.name
+            );
+        }
+        if p.backend == Backend::Claude && p.wire_api.is_some() {
+            anyhow::bail!(
+                "Profile {:?}: claude backend does not support wire_api",
+                p.name
+            );
+        }
+        if p.backend == Backend::Codex
+            && p.wire_api
+                .as_deref()
+                .is_some_and(|w| w != "responses" && w != "chat")
+        {
+            anyhow::bail!(
+                "Profile {:?}: wire_api must be \"responses\" or \"chat\"",
+                p.name
+            );
+        }
+        if p.backend == Backend::Codex
+            && p.auth_type.as_deref() == Some("subscription")
+            && p.wire_api.as_deref() == Some("chat")
+        {
+            anyhow::bail!(
+                "Profile {:?}: wire_api = \"chat\" requires proxy mode (auth_type = \"subscription\" has no proxy path)",
                 p.name
             );
         }
@@ -295,6 +325,7 @@ pub struct NewProfile {
     pub backend: Backend,
     pub full_auto: Option<ApprovalLevel>,
     pub auth_type: Option<String>,
+    pub wire_api: Option<String>,
 }
 
 pub fn profile_name_exists(name: &str) -> Result<bool> {
@@ -369,6 +400,7 @@ pub fn update_profile(original_name: &str, updated: &NewProfile) -> Result<()> {
             entry.remove("backend");
             entry.remove("full_auto");
             entry.remove("max_context_size");
+            entry.remove("wire_api");
 
             let auth_key = if updated.auth_type.as_deref() == Some("token") {
                 "ANTHROPIC_AUTH_TOKEN"
@@ -448,6 +480,13 @@ pub fn update_profile(original_name: &str, updated: &NewProfile) -> Result<()> {
             } else {
                 entry.remove("auth_type");
             }
+            // "chat" persists; anything else (None or "responses") removes the
+            // key so the default semantics are implicit.
+            set_optional_string(
+                entry,
+                "wire_api",
+                updated.wire_api.as_deref().filter(|w| *w == "chat"),
+            );
 
             let env = ensure_env_table(entry);
             set_optional_string(env, "OPENAI_API_KEY", non_empty(&updated.api_key));
@@ -532,6 +571,9 @@ pub fn append_profile(profile: &NewProfile) -> Result<()> {
             }
         }
         Backend::Codex => {
+            if profile.wire_api.as_deref() == Some("chat") {
+                block.push_str("wire_api = \"chat\"\n");
+            }
             let api_key = non_empty(&profile.api_key);
             if api_key.is_some() {
                 block.push_str("\n[profiles.env]\n");
@@ -746,6 +788,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         };
         append_profile(&new).unwrap();
         let profiles = load_profiles().unwrap();
@@ -774,6 +817,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         };
         append_profile(&new).unwrap();
         let content = std::fs::read_to_string(&path).unwrap();
@@ -851,6 +895,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         };
         append_profile(&new).unwrap();
 
@@ -956,6 +1001,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         };
         append_profile(&new).unwrap();
 
@@ -1017,6 +1063,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         };
         append_profile(&new).unwrap();
 
@@ -1129,6 +1176,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         };
         append_profile(&new).unwrap();
         let profiles = load_profiles().unwrap();
@@ -1184,6 +1232,7 @@ base_url = "https://api.example.com/v1"
             base_url: None,
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         }];
         let result = validate_profiles(&profiles);
         assert!(result.is_err());
@@ -1207,6 +1256,7 @@ base_url = "https://api.example.com/v1"
             base_url: None,
             full_auto: Some(ApprovalLevel::Danger),
             auth_type: None,
+            wire_api: None,
         }];
         let result = validate_profiles(&profiles);
         assert!(result.is_err());
@@ -1300,6 +1350,7 @@ base_url = "https://api.example.com/v1"
             backend: Backend::Codex,
             full_auto: Some(ApprovalLevel::Danger),
             auth_type: None,
+            wire_api: None,
         };
         append_profile(&new).unwrap();
 
@@ -1371,6 +1422,7 @@ OPENAI_API_KEY = "sk-old"
             backend: Backend::Codex,
             full_auto: Some(ApprovalLevel::Danger),
             auth_type: None,
+            wire_api: None,
         };
 
         update_profile("codex-profile", &updated).unwrap();
@@ -1437,6 +1489,7 @@ CUSTOM_HEADER = "keep-me"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         };
 
         update_profile("claude-profile", &updated).unwrap();
@@ -1518,6 +1571,7 @@ description = "Second profile"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         };
 
         update_profile("first", &updated).unwrap();
@@ -1552,6 +1606,7 @@ description = "Second profile"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         };
 
         let result = update_profile("missing", &updated);
@@ -1656,6 +1711,7 @@ description = "Second profile"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: Some("token".into()),
+            wire_api: None,
         };
         append_profile(&new).unwrap();
 
@@ -1700,6 +1756,7 @@ description = "Second profile"
             backend: Backend::Claude,
             full_auto: None,
             auth_type: Some("token".into()),
+            wire_api: None,
         };
         update_profile("upd", &updated).unwrap();
 
@@ -1796,6 +1853,7 @@ description = "Second profile"
             base_url: None,
             full_auto: None,
             auth_type: Some("subscription".into()),
+            wire_api: None,
         }];
         let result = validate_profiles(&profiles);
         assert!(result.is_err());
@@ -1824,6 +1882,7 @@ description = "Second profile"
             backend: Backend::Codex,
             full_auto: None,
             auth_type: Some("subscription".into()),
+            wire_api: None,
         };
         append_profile(&new).unwrap();
 
@@ -1959,6 +2018,259 @@ ANTHROPIC_API_KEY = "sk-secret"
         let backup_path = format!("{}.bak", path.display());
         let backup = std::fs::read_to_string(&backup_path).unwrap();
         assert_eq!(backup, original);
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    // --- wire_api tests ---
+
+    #[test]
+    fn profile_wire_api_roundtrips() {
+        let src = "[[profiles]]\nname = \"c\"\nbackend = \"codex\"\nwire_api = \"chat\"\n";
+        let cfg: Config = toml::from_str(src).unwrap();
+        assert_eq!(cfg.profiles[0].wire_api.as_deref(), Some("chat"));
+
+        // Missing wire_api → None (default responses semantics).
+        let src2 = "[[profiles]]\nname = \"c2\"\nbackend = \"codex\"\n";
+        let cfg2: Config = toml::from_str(src2).unwrap();
+        assert!(cfg2.profiles[0].wire_api.is_none());
+
+        // Explicit "responses" round-trips too.
+        let src3 = "[[profiles]]\nname = \"c3\"\nbackend = \"codex\"\nwire_api = \"responses\"\n";
+        let cfg3: Config = toml::from_str(src3).unwrap();
+        assert_eq!(cfg3.profiles[0].wire_api.as_deref(), Some("responses"));
+    }
+
+    #[test]
+    fn validate_rejects_wire_api_on_claude() {
+        let profiles = vec![Profile {
+            name: "bad-claude".into(),
+            description: None,
+            env: None,
+            extra_args: None,
+            skip_permissions: None,
+            model: None,
+            backend: Backend::Claude,
+            base_url: None,
+            full_auto: None,
+            auth_type: None,
+            wire_api: Some("chat".into()),
+        }];
+        let result = validate_profiles(&profiles);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("wire_api"),
+            "Error should mention wire_api, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_unknown_wire_api_value() {
+        let profiles = vec![Profile {
+            name: "bad-codex".into(),
+            description: None,
+            env: None,
+            extra_args: None,
+            skip_permissions: None,
+            model: None,
+            backend: Backend::Codex,
+            base_url: None,
+            full_auto: None,
+            auth_type: None,
+            wire_api: Some("bogus".into()),
+        }];
+        let result = validate_profiles(&profiles);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("responses") || msg.contains("chat"),
+            "Error should mention the allowed values, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_subscription_with_chat_wire_api() {
+        let profiles = vec![Profile {
+            name: "bad-sub".into(),
+            description: None,
+            env: None,
+            extra_args: None,
+            skip_permissions: None,
+            model: None,
+            backend: Backend::Codex,
+            base_url: None,
+            full_auto: None,
+            auth_type: Some("subscription".into()),
+            wire_api: Some("chat".into()),
+        }];
+        let result = validate_profiles(&profiles);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("wire_api") && msg.contains("subscription"),
+            "Error should mention wire_api and subscription, got: {msg}"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn append_codex_profile_wire_api_chat_writes_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, DEFAULT_CONFIG).unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let new = NewProfile {
+            name: "chat-wire".into(),
+            description: None,
+            base_url: Some("https://api.example.com/v1".into()),
+            api_key: None,
+            model: Some("gpt-5".into()),
+            fast_model: None,
+            backend: Backend::Codex,
+            full_auto: None,
+            auth_type: None,
+            wire_api: Some("chat".into()),
+        };
+        append_profile(&new).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let block_start = content.find("name = \"chat-wire\"").unwrap();
+        let block = &content[block_start..];
+        assert!(
+            block.contains("wire_api = \"chat\""),
+            "chat wire_api must be written, got:\n{block}"
+        );
+
+        let profiles = load_profiles().unwrap();
+        let p = profiles.iter().find(|p| p.name == "chat-wire").unwrap();
+        assert_eq!(p.wire_api.as_deref(), Some("chat"));
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn append_codex_profile_default_wire_api_omits_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, DEFAULT_CONFIG).unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let new = NewProfile {
+            name: "plain-wire".into(),
+            description: None,
+            base_url: None,
+            api_key: None,
+            model: Some("gpt-5".into()),
+            fast_model: None,
+            backend: Backend::Codex,
+            full_auto: None,
+            auth_type: None,
+            wire_api: None,
+        };
+        append_profile(&new).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let block_start = content.find("name = \"plain-wire\"").unwrap();
+        let block = &content[block_start..];
+        assert!(
+            !block.contains("wire_api"),
+            "default wire_api must not be written, got:\n{block}"
+        );
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn update_profile_wire_api_set_and_remove() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(
+            &path,
+            "[[profiles]]\nname = \"w\"\nbackend = \"codex\"\n",
+        )
+        .unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        // Set chat.
+        let updated = NewProfile {
+            name: "w".into(),
+            description: None,
+            base_url: None,
+            api_key: None,
+            model: None,
+            fast_model: None,
+            backend: Backend::Codex,
+            full_auto: None,
+            auth_type: None,
+            wire_api: Some("chat".into()),
+        };
+        update_profile("w", &updated).unwrap();
+        let mut content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("wire_api = \"chat\""), "got:\n{content}");
+        let profiles = load_profiles().unwrap();
+        assert_eq!(profiles[0].wire_api.as_deref(), Some("chat"));
+
+        // Editing back to default removes the key.
+        let updated = NewProfile {
+            name: "w".into(),
+            description: None,
+            base_url: None,
+            api_key: None,
+            model: None,
+            fast_model: None,
+            backend: Backend::Codex,
+            full_auto: None,
+            auth_type: None,
+            wire_api: None,
+        };
+        update_profile("w", &updated).unwrap();
+        content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !content.contains("wire_api"),
+            "key must be removed when wire_api is default, got:\n{content}"
+        );
+        let profiles = load_profiles().unwrap();
+        assert!(profiles[0].wire_api.is_none());
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn update_profile_removes_wire_api_when_switching_to_claude() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(
+            &path,
+            "[[profiles]]\nname = \"w\"\nbackend = \"codex\"\nwire_api = \"chat\"\n",
+        )
+        .unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let updated = NewProfile {
+            name: "w".into(),
+            description: None,
+            base_url: None,
+            api_key: None,
+            model: None,
+            fast_model: None,
+            backend: Backend::Claude,
+            full_auto: None,
+            auth_type: None,
+            wire_api: None,
+        };
+        update_profile("w", &updated).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !content.contains("wire_api"),
+            "claude backend must not keep wire_api, got:\n{content}"
+        );
+        // Must still load cleanly (validation would reject wire_api on claude).
+        load_profiles().unwrap();
 
         std::env::remove_var("CCT_CONFIG");
     }

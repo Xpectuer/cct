@@ -10,7 +10,7 @@ pub fn field_labels(backend: &Backend) -> [&'static str; 6] {
             "Pro Model",
             "Fast Model",
         ],
-        Backend::Codex => ["Name *", "Base URL", "API Key", "Model", "Approval", ""],
+        Backend::Codex => ["Name *", "Base URL", "API Key", "Model", "Approval", "Wire API"],
     }
 }
 
@@ -110,7 +110,7 @@ impl FormState {
                         Some(crate::config::ApprovalLevel::Untrusted) => "untrusted".into(),
                         None => String::new(),
                     },
-                    String::new(),
+                    profile.wire_api.clone().unwrap_or_default(),
                 ];
             }
         }
@@ -159,6 +159,7 @@ impl FormState {
                     backend: Backend::Claude,
                     full_auto: None,
                     auth_type: self.auth_type.clone(),
+                    wire_api: None,
                 }
             }
             Backend::Codex => {
@@ -173,6 +174,7 @@ impl FormState {
                     "y" | "yes" => Some(crate::config::ApprovalLevel::Danger), // backward compat
                     _ => None,
                 };
+                let wire_api_str = self.fields[5].trim().to_lowercase();
                 NewProfile {
                     name,
                     description: None,
@@ -191,6 +193,11 @@ impl FormState {
                     backend: Backend::Codex,
                     full_auto,
                     auth_type: None,
+                    wire_api: if wire_api_str == "chat" {
+                        Some("chat".into())
+                    } else {
+                        None
+                    },
                 }
             }
         }
@@ -340,6 +347,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         }
     }
 
@@ -422,7 +430,14 @@ mod tests {
         let codex_labels = field_labels(&Backend::Codex);
         assert_eq!(
             codex_labels,
-            ["Name *", "Base URL", "API Key", "Model", "Approval", ""]
+            [
+                "Name *",
+                "Base URL",
+                "API Key",
+                "Model",
+                "Approval",
+                "Wire API"
+            ]
         );
     }
 
@@ -524,6 +539,7 @@ mod tests {
             base_url: Some("https://example.com/v1".into()),
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         };
 
         let form = FormState::from_profile(&profile);
@@ -561,6 +577,7 @@ mod tests {
             base_url: Some("https://api.openai.com/v1".into()),
             full_auto: Some(crate::config::ApprovalLevel::Danger),
             auth_type: None,
+            wire_api: Some("chat".into()),
         };
 
         let form = FormState::from_profile(&profile);
@@ -576,7 +593,7 @@ mod tests {
                 "sk-openai-123".to_string(),
                 "gpt-5.4".to_string(),
                 "danger".to_string(),
-                String::new(),
+                "chat".to_string(),
             ]
         );
     }
@@ -593,6 +610,7 @@ mod tests {
         form.fields[2] = "sk-openai-key".into(); // labels[2] = "API Key"
         form.fields[3] = "gpt-4.1".into(); // labels[3] = "Model"
         form.fields[4] = "y".into(); // labels[4] = "Approval"
+        form.fields[5] = "chat".into(); // labels[5] = "Wire API"
 
         let np = form.to_new_profile();
 
@@ -611,8 +629,36 @@ mod tests {
         assert!(labels[4].contains("Approval"));
         assert_eq!(np.full_auto, Some(crate::config::ApprovalLevel::Danger));
 
+        assert!(labels[5].contains("Wire"));
+        assert_eq!(np.wire_api.as_deref(), Some("chat"));
+
         assert_eq!(np.backend, Backend::Codex);
         assert!(np.description.is_none());
+    }
+
+    /// Codex form: only "chat" maps to Some("chat"); anything else (empty,
+    /// "responses", garbage) is the default None.
+    #[test]
+    fn codex_wire_api_field_maps_only_chat() {
+        use crate::config::Backend;
+        let mut form = FormState::new();
+        form.backend = Backend::Codex;
+        form.fields[0] = "w".into();
+
+        form.fields[5] = "chat".into();
+        assert_eq!(form.to_new_profile().wire_api.as_deref(), Some("chat"));
+
+        form.fields[5] = "CHAT".into();
+        assert_eq!(form.to_new_profile().wire_api.as_deref(), Some("chat"));
+
+        form.fields[5] = "responses".into();
+        assert_eq!(form.to_new_profile().wire_api, None);
+
+        form.fields[5] = "".into();
+        assert_eq!(form.to_new_profile().wire_api, None);
+
+        form.fields[5] = "bogus".into();
+        assert_eq!(form.to_new_profile().wire_api, None);
     }
 
     /// Codex form must NOT produce API key in model field or vice versa.
@@ -664,6 +710,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: Some("token".into()),
+            wire_api: None,
         };
         let form = FormState::from_profile(&profile);
         assert_eq!(form.auth_type.as_deref(), Some("token"));

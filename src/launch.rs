@@ -219,8 +219,10 @@ fn exec_codex_proxy(profile: &Profile) -> anyhow::Error {
         .model
         .clone()
         .unwrap_or_else(|| "gpt-4.1".to_string());
+    let wire_api = profile.wire_api.as_deref().unwrap_or("responses");
 
-    if let Err(e) = crate::proxy::switch_profile(&socket_path, &base_url, &api_key, &model) {
+    if let Err(e) = crate::proxy::switch_profile(&socket_path, &base_url, &api_key, &model, wire_api)
+    {
         return anyhow::anyhow!("failed to switch proxy: {e}");
     }
 
@@ -413,6 +415,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         }
     }
 
@@ -562,6 +565,7 @@ mod tests {
             base_url: base_url.map(Into::into),
             full_auto,
             auth_type: None,
+            wire_api: None,
         }
     }
 

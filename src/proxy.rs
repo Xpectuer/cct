@@ -2,18 +2,22 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::{Arc, RwLock};
+use std::task::{Context, Poll};
 
 use bytes::Bytes;
-use futures_util::TryStreamExt;
+use futures_util::{Stream, TryStreamExt};
 use http_body_util::{BodyExt, Full, StreamBody};
 use hyper::body::{Frame, Incoming};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use hyper::{Request, Response, StatusCode};
+use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use serde::{Deserialize, Serialize};
 use tokio::net::{TcpListener, UnixListener as TokioUnixListener};
+
+use crate::translate;
 
 // ── shared state ──────────────────────────────────────────────────────────
 
@@ -22,6 +26,9 @@ struct ActiveProfile {
     base_url: String,
     api_key: String,
     model: String,
+    /// "chat" when the active profile's upstream speaks chat completions;
+    /// "" (default) means plain responses pass-through.
+    wire_api: String,
 }
 
 struct ProxyState {
@@ -39,6 +46,8 @@ pub struct ControlCommand {
     api_key: Option<String>,
     #[serde(default)]
     model: Option<String>,
+    #[serde(default)]
+    wire_api: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -50,6 +59,8 @@ pub struct ControlResponse {
     base_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    wire_api: Option<String>,
 }
 
 // ── public API ────────────────────────────────────────────────────────────
@@ -104,6 +115,7 @@ pub fn check_proxy_running(socket_path: &Path) -> bool {
         base_url: None,
         api_key: None,
         model: None,
+        wire_api: None,
     };
     send_control_timeout(socket_path, &cmd, PROBE_TIMEOUT).is_ok()
 }
@@ -140,17 +152,28 @@ fn send_control_timeout(
 }
 
 /// Ask the proxy to switch to a new active profile.
+///
+/// `wire_api` is `"chat"` for the chat-completions translation mode or
+/// anything else (`"responses"`, the default) for plain pass-through. The
+/// default semantics are held by the caller (launch) — the command only
+/// carries `wire_api` when it differs from the default.
 pub fn switch_profile(
     socket_path: &Path,
     base_url: &str,
     api_key: &str,
     model: &str,
+    wire_api: &str,
 ) -> io::Result<()> {
     let cmd = ControlCommand {
         cmd: "switch".into(),
         base_url: Some(base_url.into()),
         api_key: Some(api_key.into()),
         model: Some(model.into()),
+        wire_api: if wire_api == "chat" {
+            Some("chat".into())
+        } else {
+            None
+        },
     };
     let resp = send_control(socket_path, &cmd)?;
     status_to_result(resp)
@@ -175,6 +198,7 @@ pub fn shutdown_proxy(socket_path: &Path) -> io::Result<()> {
         base_url: None,
         api_key: None,
         model: None,
+        wire_api: None,
     };
     let resp = send_control_timeout(socket_path, &cmd, STOP_TIMEOUT)?;
     status_to_result(resp)
@@ -358,8 +382,16 @@ async fn handle_request(
             base_url: guard.base_url.clone(),
             api_key: guard.api_key.clone(),
             model: guard.model.clone(),
+            wire_api: guard.wire_api.clone(),
         }
     };
+
+    // Chat-gateway mode: translate POST /v1/responses ↔ /v1/chat/completions.
+    // All other requests (GET /v1/models, other paths, non-chat wire_api)
+    // keep the plain pass-through path below.
+    if active.wire_api == "chat" && method == Method::POST && req.uri().path() == "/v1/responses" {
+        return handle_chat_gateway(req, active).await;
+    }
 
     let upstream_url = format!(
         "{}{}",
@@ -447,6 +479,230 @@ async fn handle_request(
             ))
         }
     }
+}
+
+/// Chat-completions-only upstream: rewrite the responses request, forward to
+/// `/v1/chat/completions`, and translate the upstream response back into
+/// responses SSE events.
+async fn handle_chat_gateway(
+    req: Request<Incoming>,
+    active: ActiveProfile,
+) -> Result<Response<ProxyBody>, hyper::Error> {
+    let body_bytes = req
+        .collect()
+        .await
+        .map(|b| b.to_bytes())
+        .unwrap_or_default();
+
+    let parsed: serde_json::Value = match serde_json::from_slice(&body_bytes) {
+        Ok(v) => v,
+        Err(_) => {
+            log_proxy!(">> 502 (invalid responses request body)");
+            return Ok(plain_response(
+                StatusCode::BAD_GATEWAY,
+                "cct proxy — invalid responses request body\n",
+            ));
+        }
+    };
+
+    let chat_body = translate::responses_to_chat_request(&parsed);
+    // codex never sends a query string on /v1/responses — fixed upstream URL.
+    let upstream_url = format!(
+        "{}/v1/chat/completions",
+        active.base_url.trim_end_matches('/')
+    );
+    log_proxy!(
+        "-> upstream POST {} (model={}, wire_api=chat)",
+        mask_request_path(&upstream_url),
+        active.model
+    );
+
+    let client = reqwest::Client::new();
+    let mut upstream_req = client
+        .post(&upstream_url)
+        .header("Content-Type", "application/json")
+        .header("Accept", "text/event-stream")
+        .body(serde_json::to_vec(&chat_body).unwrap_or_default());
+    if !active.api_key.is_empty() {
+        upstream_req = upstream_req.header("Authorization", format!("Bearer {}", active.api_key));
+    }
+
+    match upstream_req.send().await {
+        Ok(upstream_resp) => {
+            let status = upstream_resp.status();
+            // Snapshot before any body consumption moves the response.
+            let upstream_ct = upstream_resp
+                .headers()
+                .get("Content-Type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            if status.as_u16() >= 400 {
+                // codex parses non-200 bodies itself — pass the error through
+                // untouched instead of translating it.
+                let bytes = upstream_resp.bytes().await.unwrap_or_default();
+                log_proxy!("<< upstream {status} (error passthrough)");
+                let ct = if upstream_ct.is_empty() {
+                    "text/plain".to_string()
+                } else {
+                    upstream_ct.clone()
+                };
+                return Ok(bytes_response(status, &ct, bytes));
+            }
+
+            let is_sse = upstream_ct.to_lowercase().contains("text/event-stream");
+
+            if is_sse {
+                log_proxy!("<< upstream 200 (chat SSE → responses)");
+                let body = StreamBody::new(ChatGatewayStream {
+                    inner: upstream_resp.bytes_stream(),
+                    decoder: translate::SseFrameDecoder::new(),
+                    translator: translate::ChatSseTranslator::new(),
+                    flushed: false,
+                })
+                .boxed();
+                return Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", "text/event-stream")
+                    .body(body)
+                    .expect("build chat gateway SSE response"));
+            }
+
+            // 200 non-SSE: a single chat.completion → synthesize the whole
+            // responses event sequence; anything unparseable passes through.
+            let bytes = upstream_resp.bytes().await.unwrap_or_default();
+            if let Ok(completion) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                if completion.get("choices").and_then(|c| c.as_array()).is_some() {
+                    log_proxy!("<< upstream 200 (non-stream completion → responses)");
+                    let mut payload = String::new();
+                    for ev in translate::ChatSseTranslator::from_chat_completion(&completion) {
+                        payload.push_str("data: ");
+                        payload.push_str(&ev);
+                        payload.push_str("\n\n");
+                    }
+                    return Ok(bytes_response(
+                        StatusCode::OK,
+                        "text/event-stream",
+                        Bytes::from(payload),
+                    ));
+                }
+            }
+            log_proxy!("<< upstream 200 (non-SSE passthrough)");
+            let ct = if upstream_ct.is_empty() {
+                "text/plain".to_string()
+            } else {
+                upstream_ct
+            };
+            Ok(bytes_response(StatusCode::OK, &ct, bytes))
+        }
+        Err(e) => {
+            // reqwest errors embed the full request URL — run the same sk-
+            // value scan as the pass-through path.
+            log_proxy!("<< upstream error: {}", mask_request_path(&format!("{e}")));
+            Ok(plain_response(
+                StatusCode::BAD_GATEWAY,
+                format!("cct proxy — upstream unreachable: {e}\n"),
+            ))
+        }
+    }
+}
+
+/// Wrap the upstream chat SSE byte stream: decode frames, translate each
+/// `data:` payload into responses events, and frame them as
+/// `data: {json}\n\n`. On stream end, flush the decoder and the translator
+/// (final done items + response.completed) as one last frame.
+struct ChatGatewayStream<S> {
+    inner: S,
+    decoder: translate::SseFrameDecoder,
+    translator: translate::ChatSseTranslator,
+    flushed: bool,
+}
+
+impl<S> Stream for ChatGatewayStream<S>
+where
+    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+{
+    type Item = Result<Frame<Bytes>, Box<dyn std::error::Error + Send + Sync>>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = &mut *self;
+        match Pin::new(&mut this.inner).poll_next(cx) {
+            Poll::Ready(Some(Ok(chunk))) => {
+                let out = translate_chat_chunk(&mut this.decoder, &mut this.translator, &chunk);
+                Poll::Ready(Some(Ok(Frame::data(Bytes::from(out)))))
+            }
+            Poll::Ready(Some(Err(e))) => {
+                Poll::Ready(Some(Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>)))
+            }
+            Poll::Ready(None) => {
+                if this.flushed {
+                    Poll::Ready(None)
+                } else {
+                    this.flushed = true;
+                    let out =
+                        chat_gateway_final_frames(&mut this.decoder, &mut this.translator);
+                    Poll::Ready(Some(Ok(Frame::data(Bytes::from(out)))))
+                }
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+/// Translate one upstream byte chunk into downstream `data: {json}\n\n`
+/// frames.
+fn translate_chat_chunk(
+    decoder: &mut translate::SseFrameDecoder,
+    translator: &mut translate::ChatSseTranslator,
+    chunk: &[u8],
+) -> Vec<u8> {
+    let mut out = Vec::new();
+    for data in decoder.push(chunk) {
+        for ev in translator.feed(&data) {
+            out.extend_from_slice(b"data: ");
+            out.extend_from_slice(ev.as_bytes());
+            out.extend_from_slice(b"\n\n");
+        }
+    }
+    out
+}
+
+/// Flush decoder leftovers and translator tail (unclosed items +
+/// `response.completed`) into one final downstream frame.
+fn chat_gateway_final_frames(
+    decoder: &mut translate::SseFrameDecoder,
+    translator: &mut translate::ChatSseTranslator,
+) -> Vec<u8> {
+    let mut out = Vec::new();
+    for data in decoder.flush() {
+        for ev in translator.feed(&data) {
+            out.extend_from_slice(b"data: ");
+            out.extend_from_slice(ev.as_bytes());
+            out.extend_from_slice(b"\n\n");
+        }
+    }
+    for ev in translator.finish() {
+        out.extend_from_slice(b"data: ");
+        out.extend_from_slice(ev.as_bytes());
+        out.extend_from_slice(b"\n\n");
+    }
+    out
+}
+
+/// Build a response from raw bytes with an explicit content type.
+fn bytes_response(status: StatusCode, content_type: &str, bytes: Bytes) -> Response<ProxyBody> {
+    let body = Full::new(bytes)
+        .map_err(
+            |_: std::convert::Infallible| -> Box<dyn std::error::Error + Send + Sync> {
+                unreachable!()
+            },
+        )
+        .boxed();
+    Response::builder()
+        .status(status)
+        .header("Content-Type", content_type)
+        .body(body)
+        .expect("build bytes response")
 }
 
 fn plain_response(status: StatusCode, body: impl Into<String>) -> Response<ProxyBody> {
@@ -557,13 +813,17 @@ fn handle_control(mut stream: UnixStream, state: Arc<ProxyState>, socket_path: P
             let base_url = cmd.base_url.unwrap_or_default();
             let api_key = cmd.api_key.unwrap_or_default();
             let model = cmd.model.unwrap_or_default();
+            let wire_api = cmd.wire_api.unwrap_or_default();
             {
                 let mut active = state.active.write().unwrap();
                 active.base_url = base_url.clone();
                 active.api_key = api_key;
                 active.model = model.clone();
+                active.wire_api = wire_api.clone();
             }
-            log_proxy!("ctl >> ok (switched to base_url={base_url}, model={model})");
+            log_proxy!(
+                "ctl >> ok (switched to base_url={base_url}, model={model}, wire_api={wire_api})"
+            );
             let _ = write_control_response(
                 &mut stream,
                 &ControlResponse {
@@ -571,15 +831,21 @@ fn handle_control(mut stream: UnixStream, state: Arc<ProxyState>, socket_path: P
                     message: None,
                     base_url: Some(base_url),
                     model: Some(model),
+                    wire_api: if wire_api.is_empty() {
+                        None
+                    } else {
+                        Some(wire_api)
+                    },
                 },
             );
         }
         "status" => {
             let active = state.active.read().unwrap();
             log_proxy!(
-                "ctl >> status (base_url={}, model={})",
+                "ctl >> status (base_url={}, model={}, wire_api={})",
                 active.base_url,
-                active.model
+                active.model,
+                active.wire_api
             );
             let _ = write_control_response(
                 &mut stream,
@@ -596,6 +862,11 @@ fn handle_control(mut stream: UnixStream, state: Arc<ProxyState>, socket_path: P
                     } else {
                         Some(active.model.clone())
                     },
+                    wire_api: if active.wire_api.is_empty() {
+                        None
+                    } else {
+                        Some(active.wire_api.clone())
+                    },
                 },
             );
         }
@@ -608,6 +879,7 @@ fn handle_control(mut stream: UnixStream, state: Arc<ProxyState>, socket_path: P
                     message: Some("shutting down".into()),
                     base_url: None,
                     model: None,
+                    wire_api: None,
                 },
             );
             // Unix socket 文件不会随进程退出自动删除，process::exit 又跳过析构：
@@ -658,6 +930,7 @@ fn error_response(message: impl Into<String>) -> ControlResponse {
         message: Some(message.into()),
         base_url: None,
         model: None,
+        wire_api: None,
     }
 }
 
@@ -693,6 +966,42 @@ mod tests {
         let cmd: ControlCommand = serde_json::from_str(json).unwrap();
         assert_eq!(cmd.cmd, "status");
         assert!(cmd.base_url.is_none());
+        assert!(cmd.wire_api.is_none(), "absent wire_api must default to None");
+    }
+
+    #[test]
+    fn control_command_wire_api_roundtrip() {
+        // Parse a command carrying wire_api = "chat".
+        let json = r#"{"cmd":"switch","base_url":"https://x","api_key":"sk","model":"m","wire_api":"chat"}"#;
+        let cmd: ControlCommand = serde_json::from_str(json).unwrap();
+        assert_eq!(cmd.cmd, "switch");
+        assert_eq!(cmd.wire_api.as_deref(), Some("chat"));
+
+        // Serialization preserves the value.
+        let out = serde_json::to_string(&cmd).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["wire_api"], "chat");
+
+        // Old commands without the field still parse (serde default).
+        let old = r#"{"cmd":"switch","base_url":"https://x","api_key":"sk","model":"m"}"#;
+        let cmd: ControlCommand = serde_json::from_str(old).unwrap();
+        assert!(cmd.wire_api.is_none());
+    }
+
+    #[test]
+    fn control_response_omits_wire_api_when_none() {
+        let resp = ControlResponse {
+            status: "ok".into(),
+            message: None,
+            base_url: Some("https://x".into()),
+            model: None,
+            wire_api: None,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(
+            !json.contains("wire_api"),
+            "None wire_api must be skipped on serialize, got: {json}"
+        );
     }
 
     #[test]
@@ -702,6 +1011,7 @@ mod tests {
             message: None,
             base_url: Some("https://api.example.com/v1".into()),
             model: Some("gpt-4".into()),
+            wire_api: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"status\":\"ok\""));
@@ -715,6 +1025,7 @@ mod tests {
             message: Some("profile not found".into()),
             base_url: None,
             model: None,
+            wire_api: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"status\":\"err\""));
@@ -799,6 +1110,7 @@ mod tests {
                     message: None,
                     base_url: None,
                     model: None,
+                    wire_api: None,
                 },
             )
             .expect("write control response");
@@ -887,6 +1199,7 @@ mod tests {
                     message: Some("shutting down".into()),
                     base_url: None,
                     model: None,
+                    wire_api: None,
                 },
             )
             .expect("write control response");
@@ -1023,5 +1336,64 @@ mod tests {
     fn mask_request_path_preserves_non_secret() {
         let path = "/v1/messages?model=gpt-4";
         assert_eq!(mask_request_path(path), path);
+    }
+
+    // ── SseFrameDecoder（chat 网关的上游 SSE 帧解码）──────────────────
+
+    /// 单帧完整 + 多帧粘包：一次 push 多个帧全部解出。
+    #[test]
+    fn sse_decoder_splits_sticky_frames_and_ignores_meta_lines() {
+        use crate::translate::SseFrameDecoder;
+        let mut d = SseFrameDecoder::new();
+        let frames = d.push(
+            b"event: response.created\ndata: {\"a\":1}\n\n: comment line\nid: 42\nretry: 100\ndata: {\"b\":2}\n\n",
+        );
+        assert_eq!(
+            frames,
+            vec![r#"{"a":1}"#.to_string(), r#"{"b":2}"#.to_string()],
+            "event/comment/id/retry lines must be ignored, data joined"
+        );
+    }
+
+    /// 半帧：帧跨多次 push 才完整；残余尾部由 flush 兜底。
+    #[test]
+    fn sse_decoder_handles_partial_frames_and_flush() {
+        use crate::translate::SseFrameDecoder;
+        let mut d = SseFrameDecoder::new();
+        assert!(d.push(b"data: {\"a\":1").is_empty(), "partial frame");
+
+        // Completes frame 1 (sticky across pushes) and starts frame 2.
+        let frames = d.push(b"}\n\ndata: {\"b\":2}");
+        assert_eq!(frames, vec![r#"{"a":1}"#.to_string()]);
+        assert!(
+            d.push(b"\n").is_empty(),
+            "frame 2 still lacks the terminating blank line"
+        );
+        // EOF: the unterminated trailing frame is emitted by flush.
+        let flushed = d.flush();
+        assert_eq!(flushed, vec![r#"{"b":2}"#.to_string()]);
+    }
+
+    /// 多行 data 以 \n 连接；无 data 的帧/空 buffer 不产出。
+    #[test]
+    fn sse_decoder_joins_data_lines_and_ignores_empty_frames() {
+        use crate::translate::SseFrameDecoder;
+        let mut d = SseFrameDecoder::new();
+        let frames = d.push(b"data: line1\ndata: line2\n\n");
+        assert_eq!(frames, vec!["line1\nline2".to_string()]);
+        assert!(d.push(b"\n\n").is_empty(), "blank-only frame yields nothing");
+        assert!(d.flush().is_empty());
+    }
+
+    /// CRLF 分隔的 SSE 帧同样正确切分。
+    #[test]
+    fn sse_decoder_handles_crlf_frames() {
+        use crate::translate::SseFrameDecoder;
+        let mut d = SseFrameDecoder::new();
+        let frames = d.push(b"data: {\"x\":1}\r\n\r\ndata: {\"y\":2}\r\n\r\n");
+        assert_eq!(
+            frames,
+            vec![r#"{"x":1}"#.to_string(), r#"{"y":2}"#.to_string()]
+        );
     }
 }

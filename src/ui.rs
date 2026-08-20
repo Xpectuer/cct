@@ -232,6 +232,9 @@ fn build_detail(profile: &Profile) -> Vec<Line<'static>> {
                 "approval: {}",
                 crate::config::approval_label(&profile.full_auto)
             )));
+            if profile.wire_api.as_deref() == Some("chat") {
+                lines.push(Line::from("wire_api: chat"));
+            }
             if profile.auth_type.as_deref() == Some("subscription") {
                 lines.push(Line::from("auth: subscription"));
             }
@@ -505,6 +508,7 @@ mod tests {
             base_url: Some("https://api.openai.com".into()),
             full_auto: Some(crate::config::ApprovalLevel::Danger),
             auth_type: None,
+            wire_api: None,
         };
 
         let lines = build_detail(&codex_profile);
@@ -536,6 +540,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         };
 
         let lines = build_detail(&claude_profile);
@@ -555,6 +560,85 @@ mod tests {
     }
 
     #[test]
+    fn detail_shows_wire_api_chat_for_codex_only() {
+        use crate::config::Backend;
+
+        let chat_profile = Profile {
+            name: "chat-wire".into(),
+            description: None,
+            env: None,
+            model: None,
+            skip_permissions: None,
+            extra_args: None,
+            backend: Backend::Codex,
+            base_url: None,
+            full_auto: None,
+            auth_type: None,
+            wire_api: Some("chat".into()),
+        };
+        let lines = build_detail(&chat_profile);
+        let joined: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("wire_api: chat"),
+            "chat wire_api must show in codex detail, got:\n{joined}"
+        );
+
+        // Default (None) codex profile shows nothing.
+        let default_profile = Profile {
+            name: "plain".into(),
+            description: None,
+            env: None,
+            model: None,
+            skip_permissions: None,
+            extra_args: None,
+            backend: Backend::Codex,
+            base_url: None,
+            full_auto: None,
+            auth_type: None,
+            wire_api: None,
+        };
+        let lines = build_detail(&default_profile);
+        let joined: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !joined.contains("wire_api"),
+            "default wire_api must not show, got:\n{joined}"
+        );
+
+        // Claude profiles never show wire_api even if the field were set.
+        let claude_profile = Profile {
+            name: "c".into(),
+            description: None,
+            env: None,
+            model: None,
+            skip_permissions: None,
+            extra_args: None,
+            backend: Backend::Claude,
+            base_url: None,
+            full_auto: None,
+            auth_type: None,
+            wire_api: Some("chat".into()),
+        };
+        let lines = build_detail(&claude_profile);
+        let joined: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !joined.contains("wire_api"),
+            "claude detail must never show wire_api, got:\n{joined}"
+        );
+    }
+
+    #[test]
     fn skip_permissions_profile_has_red_style() {
         let profile = Profile {
             name: "dangerous".into(),
@@ -567,6 +651,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         };
         // Verify skip_permissions triggers the red-style branch
         assert!(profile.skip_permissions.unwrap_or(false));
@@ -588,6 +673,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         };
         assert!(!safe_profile.skip_permissions.unwrap_or(false));
     }
@@ -708,6 +794,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: Some("token".into()),
+            wire_api: None,
         };
         let lines = build_detail(&profile);
         let joined: String = lines
@@ -734,6 +821,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         };
         let lines = build_detail(&profile);
         let joined: String = lines
@@ -760,6 +848,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: Some("subscription".into()),
+            wire_api: None,
         };
         let lines = build_detail(&profile);
         let joined: String = lines
@@ -786,6 +875,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: Some("subscription".into()),
+            wire_api: None,
         };
         // Verify auth_type is subscription
         assert_eq!(profile.auth_type.as_deref(), Some("subscription"));

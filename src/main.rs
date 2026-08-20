@@ -56,6 +56,10 @@ enum Commands {
         /// Fast model, for Haiku/SmallFast tier (non-interactive mode)
         #[arg(long = "fast-model")]
         fast_model: Option<String>,
+        /// Codex wire protocol: "responses" (default) or "chat" (proxy translates
+        /// to /v1/chat/completions for the upstream)
+        #[arg(long = "wire-api")]
+        wire_api: Option<String>,
     },
     /// Open profiles.toml in $EDITOR
     Edit,
@@ -96,6 +100,7 @@ fn main() -> Result<()> {
             api_key,
             model,
             fast_model,
+            wire_api,
         }) => cli::run_add(
             auth_type,
             backend,
@@ -105,6 +110,7 @@ fn main() -> Result<()> {
             api_key,
             model,
             fast_model,
+            wire_api,
         ),
         Some(Commands::Edit) => launch::open_editor(&config::config_path()),
         Some(Commands::Run { name }) => run_profile(name),
@@ -530,6 +536,20 @@ mod tests {
     }
 
     #[test]
+    fn clap_routing_add_with_wire_api() {
+        let cli = Cli::try_parse_from(["cct", "add", "--wire-api", "chat"]).unwrap();
+        match cli.command {
+            Some(Commands::Add {
+                wire_api, backend, ..
+            }) => {
+                assert_eq!(wire_api.as_deref(), Some("chat"));
+                assert!(backend.is_none());
+            }
+            _ => panic!("expected Add command with wire_api"),
+        }
+    }
+
+    #[test]
     fn clap_routing_add_with_backend() {
         let cli = Cli::try_parse_from(["cct", "add", "--backend", "codex"]).unwrap();
         match cli.command {
@@ -664,6 +684,7 @@ mod tests {
             base_url: Some("https://example.com/v1".into()),
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         };
         let mut app = App::new(vec![profile]);
 
@@ -696,6 +717,7 @@ mod tests {
             base_url: Some("https://example.com/v1".into()),
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         };
         let mut app = App::new(vec![profile]);
 
@@ -729,6 +751,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         };
         let mut app = App::new(vec![profile]);
 
@@ -756,6 +779,7 @@ mod tests {
                 base_url: None,
                 full_auto: None,
                 auth_type: None,
+                wire_api: None,
             },
             Profile {
                 name: "beta".into(),
@@ -768,6 +792,7 @@ mod tests {
                 base_url: None,
                 full_auto: None,
                 auth_type: None,
+                wire_api: None,
             },
         ];
 

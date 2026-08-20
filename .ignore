@@ -1,0 +1,5 @@
+# Keep routine repository searches focused on cct's current source and docs.
+# Use `rg --no-ignore` when deliberately searching imported or generated history.
+docs/references/cc-switch/
+docs/references/context-*/
+docs/session-cards/

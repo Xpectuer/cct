@@ -16,9 +16,11 @@ use tempfile::TempDir;
 /// 固定 DELTA：SSE 响应体断言锚点（smoke 与 stub_forwarding_with_bearer 共用）。
 const DELTA: &str = "CONTRACT_STUB_DELTA";
 
-/// 协议无关 stub 上游：记录 (method, path, authorization)，SSE 流式返回。
+/// 协议无关 stub 上游：记录 (method, path, authorization, body)，SSE 流式返回。
+/// chat 模式（start_chat）记录请求体并按 Content-Length 读取，回 chat SSE 流。
 struct StubUpstream {
     log: Arc<Mutex<Vec<(String, String, String)>>>,
+    bodies: Arc<Mutex<Vec<String>>>,
     port: u16,
     shutdown: Arc<AtomicBool>,
     handle: Option<std::thread::JoinHandle<()>>,
@@ -26,11 +28,21 @@ struct StubUpstream {
 
 impl StubUpstream {
     fn start() -> Self {
+        Self::start_with_chat(false)
+    }
+
+    fn start_chat() -> Self {
+        Self::start_with_chat(true)
+    }
+
+    fn start_with_chat(chat: bool) -> Self {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("stub bind");
         let port = listener.local_addr().expect("stub addr").port();
         let log = Arc::new(Mutex::new(Vec::new()));
+        let bodies = Arc::new(Mutex::new(Vec::new()));
         let shutdown = Arc::new(AtomicBool::new(false));
         let thread_log = log.clone();
+        let thread_bodies = bodies.clone();
         let thread_shutdown = shutdown.clone();
         let handle = std::thread::spawn(move || {
             for stream in listener.incoming() {
@@ -39,19 +51,29 @@ impl StubUpstream {
                     break;
                 }
                 let hlog = thread_log.clone();
+                let hbodies = thread_bodies.clone();
                 std::thread::spawn(move || {
-                    if let Ok((method, path, auth)) = read_request(&mut stream) {
+                    if let Ok((method, path, auth, body)) = read_request(&mut stream) {
                         if !method.is_empty() {
                             hlog.lock().unwrap().push((method, path, auth));
+                            if !body.is_empty() {
+                                hbodies.lock().unwrap().push(body);
+                            }
                         }
                     }
-                    let _ = stream.write_all(sse_response().as_bytes());
+                    let response = if chat {
+                        chat_sse_response()
+                    } else {
+                        sse_response()
+                    };
+                    let _ = stream.write_all(response.as_bytes());
                     let _ = stream.shutdown(Shutdown::Both);
                 });
             }
         });
         StubUpstream {
             log,
+            bodies,
             port,
             shutdown,
             handle: Some(handle),
@@ -60,6 +82,10 @@ impl StubUpstream {
 
     fn requests(&self) -> Vec<(String, String, String)> {
         self.log.lock().unwrap().clone()
+    }
+
+    fn bodies(&self) -> Vec<String> {
+        self.bodies.lock().unwrap().clone()
     }
 }
 
@@ -74,8 +100,9 @@ impl Drop for StubUpstream {
     }
 }
 
-/// 读请求行 + 头，返回 (method, path, authorization)。EOF → 空 method。
-fn read_request(stream: &mut TcpStream) -> std::io::Result<(String, String, String)> {
+/// 读请求行 + 头 + body（按 Content-Length），返回
+/// (method, path, authorization, body)。EOF → 空 method。
+fn read_request(stream: &mut TcpStream) -> std::io::Result<(String, String, String, String)> {
     let mut reader = BufReader::new(stream.try_clone().expect("clone stub stream"));
     let mut request_line = String::new();
     reader.read_line(&mut request_line)?;
@@ -83,6 +110,7 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<(String, String, Stri
     let method = parts.next().unwrap_or("").to_string();
     let path = parts.next().unwrap_or("").to_string();
     let mut auth = String::new();
+    let mut content_length = 0usize;
     loop {
         let mut line = String::new();
         if reader.read_line(&mut line)? == 0 {
@@ -98,8 +126,54 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<(String, String, Stri
                 .map(|(_, v)| v.trim().to_string())
                 .unwrap_or_default();
         }
+        if line.to_ascii_lowercase().starts_with("content-length:") {
+            content_length = line
+                .split_once(':')
+                .and_then(|(_, v)| v.trim().parse().ok())
+                .unwrap_or(0);
+        }
     }
-    Ok((method, path, auth))
+    let mut body = vec![0u8; content_length];
+    if content_length > 0 {
+        reader.read_exact(&mut body)?;
+    }
+    Ok((
+        method,
+        path,
+        auth,
+        String::from_utf8_lossy(&body).to_string(),
+    ))
+}
+
+/// Chat-completions SSE 响应体（chat 网关测试用）：content delta →
+/// finish_reason=stop → usage chunk → [DONE]。
+fn chat_sse_response() -> String {
+    let mut out = String::from(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
+    );
+    out.push_str(&format!(
+        "data: {}\n\n",
+        serde_json::json!({
+            "id": "chatcmpl-stub",
+            "object": "chat.completion.chunk",
+            "choices": [{"index": 0, "delta": {"role": "assistant", "content": DELTA}}]
+        })
+    ));
+    out.push_str(&format!(
+        "data: {}\n\n",
+        serde_json::json!({
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
+        })
+    ));
+    out.push_str(&format!(
+        "data: {}\n\n",
+        serde_json::json!({
+            "choices": [],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        })
+    ));
+    out.push_str("data: [DONE]\n\n");
+    out
 }
 
 /// SSE 事件流：response.created → response.output_text.delta → response.completed。
@@ -526,6 +600,121 @@ fn stub_forwarding_with_bearer() {
     assert!(
         created < delta && delta < completed,
         "SSE event order must be created → delta → completed"
+    );
+}
+
+/// chat 网关翻译链路（wire_api="chat"）：真实二进制 + stub chat 上游。
+/// switch 携带 wire_api="chat" → POST /v1/responses（responses 形状 body）→
+/// proxy 必须改写为 POST /v1/chat/completions（chat 形状 body：system/user
+/// messages + stream_options.include_usage）→ 上游 chat SSE 流回译成
+/// responses SSE 事件流（added → delta → done → completed + usage）。
+#[test]
+#[serial]
+fn chat_gateway_translation() {
+    let stub = StubUpstream::start_chat();
+    let stub_url = format!("http://127.0.0.1:{}", stub.port);
+
+    let (_dir, sock, port, _proxy) = start_proxy();
+
+    // switch 携带 wire_api="chat"（ControlCommand 字段私有：serde_json 构造）。
+    let switch: ControlCommand = serde_json::from_value(serde_json::json!({
+        "cmd": "switch",
+        "base_url": stub_url,
+        "api_key": "sk-contract-key",
+        "wire_api": "chat",
+    }))
+    .expect("parse switch command");
+    send_control(&sock, &switch).expect("switch command must be answered");
+
+    // 客户端以 responses 协议 POST /v1/responses。
+    let body = http_request(
+        "POST",
+        &format!("http://127.0.0.1:{port}/v1/responses"),
+        None,
+        Some(
+            r#"{"model":"gpt-test","instructions":"sys","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":true}"#,
+        ),
+        Duration::from_secs(3),
+    )
+    .expect("proxy must translate and stream the response back");
+
+    // 1) stub 收到 chat 形状的请求：POST /v1/chat/completions + Bearer 注入。
+    let reqs = stub.requests();
+    assert_eq!(
+        reqs.len(),
+        1,
+        "stub must record exactly one request, got {reqs:?}"
+    );
+    assert_eq!(reqs[0].0, "POST", "must be POST, got: {reqs:?}");
+    assert_eq!(
+        reqs[0].1, "/v1/chat/completions",
+        "path must be rewritten to chat completions, got: {reqs:?}"
+    );
+    assert_eq!(
+        reqs[0].2, "Bearer sk-contract-key",
+        "proxy must inject the switched Bearer key, got: {reqs:?}"
+    );
+
+    // 2) 改写后的 body：system/user messages + stream_options.include_usage。
+    let bodies = stub.bodies();
+    assert_eq!(
+        bodies.len(),
+        1,
+        "stub must record exactly one body, got {bodies:?}"
+    );
+    let chat: serde_json::Value = serde_json::from_str(&bodies[0]).unwrap_or_else(|e| {
+        panic!("stub body must be valid JSON — got: {:?} ({e})", bodies[0])
+    });
+    assert_eq!(
+        chat["messages"][0],
+        serde_json::json!({"role": "system", "content": "sys"}),
+        "first message must be the instructions system message"
+    );
+    assert_eq!(
+        chat["messages"][1],
+        serde_json::json!({"role": "user", "content": "hi"}),
+        "user text must be concatenated into the second message"
+    );
+    assert_eq!(chat["stream"], true);
+    assert_eq!(
+        chat["stream_options"],
+        serde_json::json!({"include_usage": true})
+    );
+
+    // 3) 客户端收到 responses 形状的 SSE 流。
+    assert!(
+        body.contains("HTTP/1.1 200"),
+        "proxy must return 200, got: {body:?}"
+    );
+    let body_lower = body.to_ascii_lowercase();
+    assert!(
+        body_lower.contains("content-type: text/event-stream"),
+        "translated SSE must be text/event-stream, got: {body:?}"
+    );
+    let added = body
+        .find("response.output_item.added")
+        .expect("missing output_item.added event");
+    let delta = body
+        .find(&format!("\"delta\":\"{DELTA}\""))
+        .expect("missing output_text.delta with stub content");
+    let done = body
+        .find("response.output_item.done")
+        .expect("missing output_item.done event");
+    let completed = body
+        .find("response.completed")
+        .expect("missing response.completed event");
+    assert!(
+        added < delta && delta < done && done < completed,
+        "SSE event order must be added → delta → done → completed"
+    );
+    // message done item + usage 映射进 completed。
+    assert!(
+        body.contains("\"type\":\"message\""),
+        "done item must be an assistant message, got: {body:?}"
+    );
+    assert!(
+        body.contains("\"input_tokens\":10"),
+        "usage must be mapped into completed, got: {body:?}"
     );
 }
 
@@ -1064,7 +1253,13 @@ fn launch_path_writes_no_codex_config() {
     // （proxy 应答 err）立即失败——不削弱契约断言。
     let mut switched = false;
     for _ in 0..3 {
-        match switch_profile(&sock, "http://127.0.0.1:1", "sk-snapshot-key", "gpt-4.1") {
+        match switch_profile(
+            &sock,
+            "http://127.0.0.1:1",
+            "sk-snapshot-key",
+            "gpt-4.1",
+            "responses",
+        ) {
             Ok(()) => {
                 switched = true;
                 break;

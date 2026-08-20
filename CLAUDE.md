@@ -1,164 +1,92 @@
 ---
-title: AGENTS.md/CLAUDE.md
+title: Agent guide
 doc_type: guide
-brief: This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-confidence: speculative
-created: 2026-07-03
-updated: 2026-07-03
-revision: 1
+brief: Minimal repository map and working rules for coding agents.
+updated: 2026-08-20
 ---
-# AGENTS.md/CLAUDE.md
+# Agent Guide
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+`AGENTS.md` is a symlink to this file. Keep this entry point short; follow links only when the task needs them.
 
-## Agent Installation
+## Project
 
-See [INSTALL.md](INSTALL.md) for automated cct installation instructions (curl|bash, cargo, manual download). For AI coding agents, [INSTALL_PROMPT.md](INSTALL_PROMPT.md) contains a self-contained copy-paste install prompt.
+`cct` is a Rust terminal UI and CLI for managing named Claude Code and OpenAI Codex profiles. It reads `profiles.toml`, lets users select or edit profiles, and exec-replaces itself with the selected CLI. Codex profiles can use a local proxy, including Responses API to Chat Completions translation.
 
-## Project Overview
+## Start Here
 
-`cct` is a terminal UI launcher for Claude Code and OpenAI Codex. It reads named profiles from a TOML config file (`~/Library/Application Support/cc-tui/profiles.toml` on macOS or `~/.config/cc-tui/profiles.toml` on Linux/other Unix-like systems), displays them in a ratatui TUI organized into Claude/Codex backend tabs, and exec-replaces the process with `claude <args>` or `codex [--full-auto]` when the user selects a profile.
+1. Read [README.md](README.md) for user-visible behavior and commands.
+2. Read [ARCHITECTURE.md](ARCHITECTURE.md) before changing cross-module behavior.
+3. Use [docs/README.md](docs/README.md) as the canonical documentation index.
+4. Read only the relevant module guide and rules for the task.
 
-## Build & Test Commands
+Historical material under `docs/drafts/`, `docs/procs/`, `docs/session-cards/`, and timestamped `docs/references/context-*` is evidence, not current specification. Do not bulk-load or update it unless the task explicitly targets history.
+
+Routine `rg` searches skip imported and generated history via `.ignore`. Use `rg --no-ignore` when a task explicitly needs those files.
+
+## Repository Map
+
+| Path | Purpose |
+|------|---------|
+| `src/` | Product code |
+| `tests/` | Integration, live, proxy-contract, and installer tests |
+| `scripts/` | Documentation workflow and config-validation helpers |
+| `examples/` | Small API usage examples |
+| `docs/modules/` | Stable module contracts |
+| `docs/rules/` | Project-specific engineering rules |
+| `docs/lessons/` | Reusable findings from previous work |
+| `docs/drafts/`, `docs/procs/` | Historical design and execution records |
+| `docs/references/` | External or captured reference material |
+
+Current Rust modules:
+
+| Module | Responsibility |
+|--------|----------------|
+| `config` | Profile schema, validation, migration, and surgical TOML edits |
+| `app` | TUI state and backend-aware form mapping |
+| `ui` | Rendering and secret masking |
+| `cli` | Interactive and non-interactive CLI flows |
+| `launch` | Command construction, process replacement, and proxy startup |
+| `proxy` | Local Codex proxy daemon and control socket |
+| `translate` | Responses API / Chat Completions translation |
+
+`main.rs` is the effectful entry point; `lib.rs` exposes the modules for tests.
+
+## Commands
+
+Use `rtk` for compact output.
 
 ```bash
-cargo build           # debug build
-cargo build --release # release build
-cargo test            # run all tests
-cargo test <name>     # run a single test by name (e.g. cargo test build_args_full)
-cargo clippy          # lint
-cargo run             # run the TUI locally
-
-# E2E (mock — no real claude needed)
-cargo test --test integration
-
-# E2E (live — requires `claude` binary installed)
-CCT_LIVE_TESTS=1 cargo test --test live
-
-# Shell tests for install.sh (requires bats-core)
-bats tests/install.bats
+rtk cargo test
+rtk cargo test --test integration
+rtk cargo test --test proxy_contract
+rtk cargo clippy --all-targets --all-features
+rtk cargo build
 ```
 
-## Local Shell Notes
+Optional checks:
 
-- On this machine, Cargo is already initialized from `~/path_variables.zsh` via `. "$HOME/.cargo/env"`.
-- `~/.zshrc` sources `~/path_variables.zsh`, so do not add a second Cargo init line directly to `~/.zshrc` unless explicitly requested.
-
-## Architecture
-
-The app is five focused modules with no shared mutable state:
-
-| Module | File | Responsibility |
-|--------|------|----------------|
-| `config` | `src/config.rs` | Deserialize `profiles.toml`; `Backend` enum; `validate_profiles`; write default config; append/update profiles with backend-specific env generation; `toggle_skip_permissions`, `toggle_auth_type`, `toggle_full_auto` via toml_edit; auto-migrate legacy `kimi` profiles on load |
-| `app` | `src/app.rs` | Cursor state, `active_backend`, `filtered_indices()`, `switch_backend()`, `AppMode` (Normal/AddForm), `FormState` with `to_new_profile()` as single source of truth |
-| `ui` | `src/ui.rs` | ratatui rendering — tab bar + 35/65 split filtered list+detail panel + footer; backend-aware `build_form_lines`; masks sensitive env vars |
-| `launch` | `src/launch.rs` | `build_launch_command` dispatch; `exec_claude`/`exec_codex`; `build_codex_proxy_config_args`; `exec()` process replace; open `$EDITOR`; check/install claude binary |
-| `cli` | `src/cli.rs` | `cct add` interactive CLI flow — 5 prompts, `--auth-type` flag, masked summary, duplicate guard (Claude profiles only), non-interactive `--name` flag mode for agents/scripts |
-
-**Data flow:** `main` checks backend binaries → loads + validates profiles → creates `App` → draw loop → on Enter dispatches to `launch::exec_claude` or `launch::exec_codex` based on `profile.backend`.
-
-**Key design choices:**
-- `exec` (not `spawn`) is used so the target CLI inherits the terminal cleanly; there is no return path on success.
-- `ui::mask_value` redacts any env key containing `TOKEN`, `KEY`, or `SECRET`.
-- Config hot-reload on `e`: editor opens, then profiles are re-parsed in-place without restart.
-- `FormState::to_new_profile()` is the single source of truth for form-field-index → semantic mapping per backend.
-- Codex launch: `CODEX_HOME` is never set — all profiles share the default `~/.codex` history/sessions; proxy mode (API key) injects the custom provider via 6 inline `--config` flags (`build_codex_proxy_config_args`) instead of writing `config.toml`, and subscription mode (OAuth) passes `--config model_provider=openai`.
-- `s` key toggles `skip_permissions` on the selected Claude profile; `t` key toggles `auth_type` between `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN`; `d` key duplicates the selected profile (appends `_copy` to name, opens pre-filled add form); all persisted via `toml_edit` to preserve comments.
-- On TUI startup, if `claude` is missing, `prompt_install()` offers to run the official installer before entering raw mode; `cct run` auto-installs non-interactively (`install_claude()`) so agents and scripts work on first run.
-- Kimi profiles (removed in v0.6.0) are migrated automatically: `load_profiles()` rewrites `backend = "kimi"` → `"claude"` via `migrate_kimi_profiles` before parsing (kimi endpoints are Anthropic-compatible, so launch behavior is preserved), backs up the original to `profiles.toml.bak`, and prints one stderr line. Idempotent — the fast path skips untouched files.
-
-## Config File Format
-
-Located at `~/Library/Application Support/cc-tui/profiles.toml` on macOS and `~/.config/cc-tui/profiles.toml` on Linux/other Unix-like systems. Each profile block:
-
-```toml
-[[profiles]]
-name = "third-party"
-description = "Third-party Claude endpoint"
-model = "MiniMax-M2.1"                  # optional — maps to --model
-skip_permissions = false            # optional — adds --dangerously-skip-permissions
-auth_type = "token"                 # optional — "token" uses ANTHROPIC_AUTH_TOKEN instead of ANTHROPIC_API_KEY
-extra_args = ["--verbose"]          # optional — appended verbatim
-
-# Auto-generated by `cct add` when base_url / api_key / model provided:
-[profiles.env]
-ANTHROPIC_BASE_URL = "https://api.example.com/v1"
-ANTHROPIC_API_KEY = "sk-..."
-ANTHROPIC_MODEL = "MiniMax-M2.1"
-ANTHROPIC_SMALL_FAST_MODEL = "MiniMax-M2.1"
-ANTHROPIC_DEFAULT_SONNET_MODEL = "MiniMax-M2.1"
-ANTHROPIC_DEFAULT_OPUS_MODEL = "MiniMax-M2.1"
-ANTHROPIC_DEFAULT_HAIKU_MODEL = "MiniMax-M2.1"
-API_TIMEOUT_MS = "600000"
-CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+```bash
+bats tests/install.bats                  # requires bats-core
+CCT_LIVE_TESTS=1 cargo test --test live  # requires a real claude binary
 ```
 
-**Profile add flow** (`cct add` or press `a` in TUI): prompts for 5 fields — Name (required), Description, Base URL, API Key, Model. Supports `--auth-type token` flag to write `ANTHROPIC_AUTH_TOKEN` instead of `ANTHROPIC_API_KEY`. For agents/scripts, `cct add --name <n> [--description ... --base-url ... --api-key ... --model ... --fast-model ...]` skips all prompts and writes the profile directly. When any env-bearing field is non-empty, a `[profiles.env]` block is automatically written. The `model` field populates 5 model alias env vars plus `API_TIMEOUT_MS` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`.
+For commands that access external hosts, first source `~/.zsh/user.zsh`. It enables the local proxy by default; use `unset_proxy` for direct/internal access or `set_clx_proxy` for the Clounix proxy.
 
-## Docs Directory
+## Change Rules
 
-| Directory | Purpose |
-|-----------|---------|
-| `docs/drafts/` | Design phase — intake, idea, interview, plan sessions |
-| `docs/procs/` | Execution phase — tdd/progress tracking (activated work) |
-| `docs/lessons/` | Lessons learned |
-| `docs/rules/` | Coding rules and standards |
-| `docs/sops/` | Standard operating procedures |
-| `docs/issues/` | Issue tracking and bug reports |
-| `docs/modules/` | Module/component documentation |
-| `docs/references/` | Reference documents and external resources |
-| `docs/quality/` | Quality reviews and audits |
+- Read a file before editing it. Preserve unrelated local changes.
+- Make the smallest change that satisfies the request; match existing style.
+- Do not skip Git pre-commit hooks unless the user explicitly allows it.
+- Preserve user-edited TOML structure with `toml_edit`; do not rewrite the whole config.
+- Mask values whose keys contain `TOKEN`, `KEY`, or `SECRET` on every display path.
+- Backend-dependent mappings need one authoritative function.
+- TUI hotkeys require a visible footer hint and a test; review CLI parity for every TUI feature.
+- Test external-command boundaries with stubs before live verification.
+- Cross-module behavior needs a contract test.
+- New feature work must update `README.md`, `ARCHITECTURE.md`, and the relevant module guide.
+- Put new documentation under `docs/` and add it to [docs/README.md](docs/README.md).
+- Move files to Trash instead of permanently deleting them.
 
-<!-- BEGIN:module-docs -->
-## Module Documentation
+## Verification
 
-Detailed module docs are in `docs/modules/`:
-
-- [Module Index](docs/modules/index.md) — cross-module dependency graph and global interface index
-- [config](docs/modules/config.md) — TOML deserialization, Backend enum, validate_profiles, config path, default bootstrap, toggle_skip_permissions
-- [app](docs/modules/app.md) — cursor state, backend-filtered navigation, FormState.to_new_profile (single source of truth)
-- [ui](docs/modules/ui.md) — ratatui rendering, tab bar, backend-aware form labels, sensitive-value masking
-- [launch](docs/modules/launch.md) — arg building, exec-replace for Claude and Codex, inline `--config` flags, editor open, autoinstall check
-- [cli](docs/modules/cli.md) — cct add interactive CLI flow, 5 prompts, masked summary, duplicate guard
-
-Rules:
-- [KISS](docs/rules/kiss.md) — prefer the simplest viable solution
-- [Pure builders, thin effectful edges](docs/rules/pure-builders-thin-effectful-edges.md) — separate pure decision logic from side effects
-- [Single source of truth for variant mappings](docs/rules/single-source-of-truth-variant-mappings.md) — one authoritative function per backend-dependent mapping
-- [Mask secrets on every display path](docs/rules/mask-secrets-on-every-display-path.md) — redact TOKEN/KEY/SECRET in all UI and debug output
-- [Preserve user-edited config structure](docs/rules/preserve-user-edited-config-structure.md) — use surgical edits (toml_edit) instead of full rewrites
-- [Hotkey UI changes must be discoverable](docs/rules/hotkey-ui-changes-must-be-discoverable.md) — every new key binding needs a footer hint and a test
-- [Test boundaries with stubs before manual verification](docs/rules/test-boundaries-with-stubs-before-manual-verification.md) — stub external commands before live calls
-- [Assert contracts, not incidental platform strings](docs/rules/assert-contracts-not-incidental-platform-strings.md) — match semantic contracts, not exact tool output wording
-- [Cross-module features need contract tests](docs/rules/cross-module-features-need-contract-tests.md) — cover data flows across module boundaries
-- [TUI-CLI sync](docs/rules/tui-cli-sync.md) — when adding TUI features, always review whether CLI needs corresponding options
-- [Update docs after new feature](docs/rules/update-docs-after-new-feature.md) — after implementing a new feature, update README, ARCHITECTURE, and relevant module docs
-
-Lessons:
-- [BATS stubbing](docs/lessons/bats-shell-function-stubbing.md) — export -f pattern for shell test isolation
-- [Form field index single source of truth](docs/lessons/form-field-index-single-source-of-truth.md) — why polymorphic field buffers need a single mapping function
-- [External tool config schema must be verified](docs/lessons/external-tool-config-schema-must-be-verified.md) — auth.json key casing and required fields must be confirmed from a working example, not guessed
-- [cct env preserves argument boundaries](docs/lessons/cct-env-exec-no-shell-expansion.md) — shell syntax passed as literal argv stays literal; use `sh -c` explicitly when needed
-- [cct env can inject env vars into happy daemon](docs/lessons/happy-daemon-env-injection-via-cct.md) — use `cct env <profile> -- happy daemon start` to seed daemon sessions with profile env
-- [install.sh intercepted 404](docs/lessons/install-script-404-network-issue.md) — a proxy/intermediary 404 can look like a genuine missing-release response
-- [GitLab Runner SSH cloning on self-hosted](docs/lessons/gitlab-runner-ssh-cloning-self-hosted.md) — helper image uses apk not apt-get; volume-mounted .ssh has wrong ownership; tagged runners ignore untagged jobs
-- [GitLab CI/CD Rust musl cross-compilation](docs/lessons/gitlab-cicd-rust-musl-cross-compilation.md) — use cargo-zigbuild on Docker runners and avoid YAML folding traps
-- [Clap subcommand changes must sync spawn args](docs/lessons/clap-subcommand-sync-spawn-args.md) — update every internal spawn site when a subcommand gains required children
-- [Stale daemon undermines fix verification](docs/lessons/stale-daemon-undermines-fix-verification.md) — probe coverage must equal the fault surface; verify the running instance is the fixed binary
-- [Proxy base URL must not carry /v1](docs/lessons/proxy-base-url-no-version-prefix.md) — forwarding concatenates base_url + client path; OpenAI-compatible clients already send /v1 in the path
-
-References:
-- [install-script reference](docs/references/install-script.md) — curl|bash installer functions and test coverage
-- [Codex backend development guide](docs/references/codex-backend-development-guide.md) — config schema, validation, UI behavior, launch flow, and full_auto toggling
-- [Codex CODEX_HOME storage layout](docs/references/codex-home-storage-layout.md) — shared `~/.codex` state (all profiles) and sqlite schema observations
-- [Context snapshot index](docs/references/index.md) — session context snapshots and cross-references
-
-Quality:
-- [Codebase review](docs/quality/codebase-review.md) — gap analysis, risk assessment, and AI usability score
-
-Dashboard:
-- [docs/dashboard.md](docs/dashboard.md) — project status dashboard (drafts, procs, progress)
-
-See also: [ARCHITECTURE.md](ARCHITECTURE.md) for the system-level overview.
-<!-- END:module-docs -->
+Define the observable success condition before coding. Run the narrowest relevant test while iterating, then run the broader affected suite. If a verification method is unclear, stop and ask rather than claiming success.

@@ -37,8 +37,17 @@ pub fn run_add(
     api_key: Option<String>,
     model: Option<String>,
     fast_model: Option<String>,
+    wire_api: Option<String>,
 ) -> Result<()> {
     let backend = resolve_backend(backend)?;
+    if let Some(w) = &wire_api {
+        if w != "responses" && w != "chat" {
+            anyhow::bail!("Error: --wire-api must be \"responses\" or \"chat\".");
+        }
+        if backend == config::Backend::Claude {
+            anyhow::bail!("Error: --wire-api is only supported for the codex backend.");
+        }
+    }
     // Non-interactive mode: agents and scripts provide --name (and optionally
     // the other fields) and get no prompts or confirmations.
     let Some(name) = name else {
@@ -61,6 +70,7 @@ pub fn run_add(
         backend,
         full_auto: None,
         auth_type,
+        wire_api,
     };
     config::append_profile(&profile)?;
     println!("Profile '{}' added.", name);
@@ -215,6 +225,7 @@ pub fn run_add_with<R: BufRead, W: Write>(
         backend,
         full_auto: None,
         auth_type,
+        wire_api: None,
     };
     config::append_profile(&profile)?;
     writeln!(writer, "Profile '{}' added.", name)?;
@@ -314,6 +325,7 @@ mod tests {
             Some("sk-flag".into()),
             Some("MiniMax-M2.1".into()),
             None,
+            None,
         )
         .unwrap();
 
@@ -335,8 +347,18 @@ mod tests {
         std::fs::write(&path, "").unwrap();
         std::env::set_var("CCT_CONFIG", &path);
 
-        let err =
-            run_add(None, None, Some("   ".into()), None, None, None, None, None).unwrap_err();
+        let err = run_add(
+            None,
+            None,
+            Some("   ".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("--name"), "got: {err}");
 
         std::env::remove_var("CCT_CONFIG");
@@ -360,9 +382,99 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .unwrap_err();
         assert!(err.to_string().contains("already exists"), "got: {err}");
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn run_add_rejects_invalid_wire_api() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, "").unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let err = run_add(
+            None,
+            Some("codex".into()),
+            Some("p".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("bogus".into()),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("wire-api"),
+            "error should mention --wire-api, got: {err}"
+        );
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn run_add_rejects_wire_api_on_claude_backend() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, "").unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let err = run_add(
+            None,
+            Some("claude".into()),
+            Some("p".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("chat".into()),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("codex"),
+            "error should mention codex backend, got: {err}"
+        );
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn run_add_wire_api_chat_writes_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, "[[profiles]]\nname = \"seed\"\n").unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        run_add(
+            None,
+            Some("codex".into()),
+            Some("chat-wire".into()),
+            None,
+            Some("https://api.example.com/v1".into()),
+            None,
+            Some("gpt-5".into()),
+            None,
+            Some("chat".into()),
+        )
+        .unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            content.contains("wire_api = \"chat\""),
+            "expected wire_api = \"chat\" in config, got:\n{content}"
+        );
+        let profiles = config::load_profiles().unwrap();
+        let p = profiles.iter().find(|p| p.name == "chat-wire").unwrap();
+        assert_eq!(p.wire_api.as_deref(), Some("chat"));
 
         std::env::remove_var("CCT_CONFIG");
     }
@@ -405,6 +517,7 @@ mod tests {
                 base_url: None,
                 full_auto: None,
                 auth_type: None,
+                wire_api: None,
             },
             Profile {
                 name: "beta".into(),
@@ -417,6 +530,7 @@ mod tests {
                 base_url: None,
                 full_auto: None,
                 auth_type: None,
+                wire_api: None,
             },
         ];
         let input = b"2\n";
@@ -442,6 +556,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         }];
         let input = b"abc\n";
         let mut output: Vec<u8> = Vec::new();
@@ -462,6 +577,7 @@ mod tests {
             base_url: None,
             full_auto: None,
             auth_type: None,
+            wire_api: None,
         }];
         let input = b"99\n";
         let mut output: Vec<u8> = Vec::new();
