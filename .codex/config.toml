@@ -4,3 +4,6 @@ inherit = "core"
 [shell_environment_policy.set]
 RUST_LOG = "debug"
 RUST_BACKTRACE = "1"
+
+[features]
+default_mode_request_user_input = true
