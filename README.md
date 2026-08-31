@@ -1,3 +1,5 @@
+
+
 <p align="center">
   <img src="./logo.png" alt="cct logo" width="160">
 </p>
@@ -40,7 +42,7 @@ A terminal UI for managing and launching [Claude Code](https://claude.ai/code) a
 
 **Option A — curl|bash (GitHub, recommended)**:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Xpectuer/cc_starter/refs/heads/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Xpectuer/cct/refs/heads/master/install.sh | bash
 ```
 
 **Option B — curl|bash (self-hosted GitLab, internal network)**:
